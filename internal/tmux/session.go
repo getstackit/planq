@@ -114,9 +114,11 @@ func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*go
 		// Send command to artifact pane if specified
 		if len(panes) > 1 && len(layout.Panes) > 1 && layout.Panes[1].Command != "" {
 			artifactPane := panes[1]
-			err = artifactPane.SendKeys(layout.Panes[1].Command)
-			if err != nil {
+			if err = artifactPane.SendKeys(layout.Panes[1].Command); err != nil {
 				return nil, fmt.Errorf("failed to send command to artifact pane: %w", err)
+			}
+			if err = artifactPane.SendKeys("Enter"); err != nil {
+				return nil, fmt.Errorf("failed to send Enter to artifact pane: %w", err)
 			}
 		}
 	}
@@ -128,9 +130,11 @@ func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*go
 			return nil, fmt.Errorf("failed to list panes: %w", err)
 		}
 		if len(panes) > 0 {
-			err = panes[0].SendKeys(layout.Panes[0].Command)
-			if err != nil {
+			if err = panes[0].SendKeys(layout.Panes[0].Command); err != nil {
 				return nil, fmt.Errorf("failed to send command to main pane: %w", err)
+			}
+			if err = panes[0].SendKeys("Enter"); err != nil {
+				return nil, fmt.Errorf("failed to send Enter to main pane: %w", err)
 			}
 		}
 	}
