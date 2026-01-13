@@ -1,0 +1,187 @@
+// Package tmux provides a wrapper around gotmux for workspace session management.
+package tmux
+
+import (
+	"fmt"
+
+	"github.com/GianlucaP106/gotmux/gotmux"
+)
+
+// Manager handles tmux session and pane operations.
+type Manager struct {
+	tmux *gotmux.Tmux
+}
+
+// NewManager creates a new tmux manager.
+func NewManager() (*Manager, error) {
+	t, err := gotmux.DefaultTmux()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize tmux: %w", err)
+	}
+	return &Manager{tmux: t}, nil
+}
+
+// Layout defines the pane arrangement for a workspace.
+type Layout struct {
+	Name        string
+	Description string
+	Panes       []PaneSpec
+}
+
+// PaneSpec defines a single pane in a layout.
+type PaneSpec struct {
+	Name    string
+	Size    int    // Percentage (0 = auto)
+	Command string // Command to run in the pane
+}
+
+// DefaultLayout returns the default agent-artifact layout.
+func DefaultLayout() Layout {
+	return Layout{
+		Name:        "agent-artifact",
+		Description: "Main pane for agent, side pane for artifacts",
+		Panes: []PaneSpec{
+			{Name: "agent", Size: 70, Command: ""},
+			{Name: "artifacts", Size: 30, Command: ""},
+		},
+	}
+}
+
+// SessionExists checks if a tmux session with the given name exists.
+func (m *Manager) SessionExists(name string) (bool, error) {
+	sessions, err := m.tmux.ListSessions()
+	if err != nil {
+		// If tmux server isn't running, no sessions exist
+		return false, nil
+	}
+
+	for _, s := range sessions {
+		if s.Name == name {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+// CreateSession creates a new tmux session with the given layout.
+func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*gotmux.Session, error) {
+	// Create the session
+	session, err := m.tmux.NewSession(&gotmux.SessionOptions{
+		Name:           name,
+		StartDirectory: workdir,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to create session %q: %w", name, err)
+	}
+
+	// Get the first window
+	windows, err := session.ListWindows()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list windows: %w", err)
+	}
+	if len(windows) == 0 {
+		return nil, fmt.Errorf("session created but has no windows")
+	}
+	window := windows[0]
+
+	// If we have more than one pane defined, split the window
+	if len(layout.Panes) > 1 {
+		// Get the main pane
+		panes, err := window.ListPanes()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list panes: %w", err)
+		}
+		if len(panes) == 0 {
+			return nil, fmt.Errorf("window has no panes")
+		}
+		mainPane := panes[0]
+
+		// Split for the second pane (artifacts) - horizontal means side by side
+		err = mainPane.SplitWindow(&gotmux.SplitWindowOptions{
+			SplitDirection: gotmux.PaneSplitDirectionHorizontal,
+			StartDirectory: workdir,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to split pane: %w", err)
+		}
+
+		// Get the new pane (should be the second one now)
+		panes, err = window.ListPanes()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list panes after split: %w", err)
+		}
+
+		// Send command to artifact pane if specified
+		if len(panes) > 1 && len(layout.Panes) > 1 && layout.Panes[1].Command != "" {
+			artifactPane := panes[1]
+			err = artifactPane.SendKeys(layout.Panes[1].Command)
+			if err != nil {
+				return nil, fmt.Errorf("failed to send command to artifact pane: %w", err)
+			}
+		}
+	}
+
+	// Send command to main pane if specified
+	if len(layout.Panes) > 0 && layout.Panes[0].Command != "" {
+		panes, err := window.ListPanes()
+		if err != nil {
+			return nil, fmt.Errorf("failed to list panes: %w", err)
+		}
+		if len(panes) > 0 {
+			err = panes[0].SendKeys(layout.Panes[0].Command)
+			if err != nil {
+				return nil, fmt.Errorf("failed to send command to main pane: %w", err)
+			}
+		}
+	}
+
+	return session, nil
+}
+
+// KillSession terminates a tmux session by name.
+func (m *Manager) KillSession(name string) error {
+	sessions, err := m.tmux.ListSessions()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	for _, s := range sessions {
+		if s.Name == name {
+			return s.Kill()
+		}
+	}
+
+	return fmt.Errorf("session %q not found", name)
+}
+
+// AttachSession attaches to an existing tmux session.
+func (m *Manager) AttachSession(name string) error {
+	sessions, err := m.tmux.ListSessions()
+	if err != nil {
+		return fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	for _, s := range sessions {
+		if s.Name == name {
+			return s.Attach()
+		}
+	}
+
+	return fmt.Errorf("session %q not found", name)
+}
+
+// ListSessions returns all planq-prefixed sessions.
+func (m *Manager) ListSessions(prefix string) ([]*gotmux.Session, error) {
+	sessions, err := m.tmux.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	var result []*gotmux.Session
+	for _, s := range sessions {
+		if prefix == "" || len(s.Name) >= len(prefix) && s.Name[:len(prefix)] == prefix {
+			result = append(result, s)
+		}
+	}
+	return result, nil
+}
