@@ -136,6 +136,12 @@ build:
 	DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 	go build -ldflags "-X main.version=dev-local -X main.commit=$COMMIT -X main.date=$DATE" -o bin/planq ./cmd/planq
 
+# Install shims to repo root for local development (. in PATH)
+install-shims: build
+	cp scripts/planq-shim.sh ./planq
+	chmod +x ./planq
+	@echo "Dev shim installed to repo root"
+
 # Install binary to ~/.local/bin (with distinct version)
 install:
 	#!/bin/bash
