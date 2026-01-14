@@ -59,5 +59,5 @@ func (w *Workspace) AgentCommand() string {
 		w.Name,
 		planFile,
 	)
-	return fmt.Sprintf("claude --plan --append-system-prompt %q", systemPrompt)
+	return fmt.Sprintf("claude -p --append-system-prompt %q", systemPrompt)
 }
