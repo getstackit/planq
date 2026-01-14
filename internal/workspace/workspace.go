@@ -1,14 +1,20 @@
 package workspace
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
 )
 
+//go:embed templates/planq-mode.md
+var planqModeSkill string
+
 const (
 	// PlanqDirName is the name of the planq directory within a worktree.
 	PlanqDirName = ".planq"
+	// ClaudeDirName is the name of the Claude configuration directory.
+	ClaudeDirName = ".claude"
 )
 
 // Workspace represents a planq workspace with its configuration.
@@ -22,6 +28,11 @@ func (w *Workspace) PlanqDir() string {
 	return filepath.Join(w.WorktreePath, PlanqDirName)
 }
 
+// ClaudeCommandsDir returns the path to the .claude/commands directory.
+func (w *Workspace) ClaudeCommandsDir() string {
+	return filepath.Join(w.WorktreePath, ClaudeDirName, "commands")
+}
+
 // PlanFile returns the path to the plan file (named after the workspace).
 func (w *Workspace) PlanFile() string {
 	return filepath.Join(w.PlanqDir(), w.Name+".md")
@@ -32,6 +43,7 @@ func (w *Workspace) InitPlanqDir() error {
 	dirs := []string{
 		w.PlanqDir(),
 		filepath.Join(w.PlanqDir(), "artifacts"),
+		w.ClaudeCommandsDir(),
 	}
 
 	for _, dir := range dirs {
@@ -44,6 +56,12 @@ func (w *Workspace) InitPlanqDir() error {
 	planFile := w.PlanFile()
 	if err := os.WriteFile(planFile, []byte{}, 0644); err != nil {
 		return fmt.Errorf("failed to create plan file %s: %w", planFile, err)
+	}
+
+	// Create planq-mode skill for Claude
+	skillFile := filepath.Join(w.ClaudeCommandsDir(), "planq-mode.md")
+	if err := os.WriteFile(skillFile, []byte(planqModeSkill), 0644); err != nil {
+		return fmt.Errorf("failed to create skill file %s: %w", skillFile, err)
 	}
 
 	// Initialize mode to plan
