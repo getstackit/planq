@@ -337,6 +337,9 @@ func (m *Manager) layoutMatches(sessionName string, layout Layout) bool {
 			if cmd != "glow" {
 				return false
 			}
+		case "diff":
+			// Diff pane runs a while loop in a shell, so accept any shell
+			// (the loop runs git diff | delta continuously)
 		case "terminal":
 			// Terminal can be any shell - no specific requirement
 		default:
