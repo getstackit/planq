@@ -24,7 +24,7 @@ func ExecuteLayout(agentCmd string) Layout {
 		Description: "Execution mode: agent + git diff",
 		Panes: []PaneSpec{
 			{Name: "agent", Size: 50, Command: agentCmd},
-			{Name: "diff", Size: 50, Command: "watch -c -n 2 'git diff --color=always | delta --paging=never'"},
+			{Name: "diff", Size: 50, Command: "while true; do clear; git diff --color=always | delta --paging=never; sleep 2; done"},
 		},
 	}
 }

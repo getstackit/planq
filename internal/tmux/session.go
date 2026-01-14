@@ -338,10 +338,8 @@ func (m *Manager) layoutMatches(sessionName string, layout Layout) bool {
 				return false
 			}
 		case "diff":
-			// Diff pane should be running watch (for git diff)
-			if cmd != "watch" {
-				return false
-			}
+			// Diff pane runs a while loop in a shell, so accept any shell
+			// (the loop runs git diff | delta continuously)
 		case "terminal":
 			// Terminal can be any shell - no specific requirement
 		default:
