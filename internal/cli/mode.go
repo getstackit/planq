@@ -215,6 +215,26 @@ func reconfigureSession(name, workdir string, ws *workspace.Workspace, mode work
 		return fmt.Errorf("failed to reconfigure session: %w", err)
 	}
 
+	// Update status bar with current mode
+	if err := tm.ConfigureStatusBar(sessionName, name, string(mode)); err != nil {
+		// Non-fatal, just warn
+		fmt.Printf("Warning: could not update status bar: %v\n", err)
+	}
+
+	// Set pane titles based on mode
+	var paneTitles []string
+	if mode == workspace.ModeExecute {
+		paneTitles = []string{"Agent"}
+	} else {
+		paneTitles = []string{"Agent", "Plan", "Terminal"}
+	}
+	for i, title := range paneTitles {
+		if err := tm.SetPaneTitle(sessionName, i, title); err != nil {
+			// Non-fatal, pane might not exist yet
+			break
+		}
+	}
+
 	if changed {
 		fmt.Printf("Reconfigured tmux session for %s mode\n", mode)
 	} else {

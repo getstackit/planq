@@ -88,6 +88,15 @@ func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*go
 		fmt.Printf("Warning: could not enable mouse support: %v\n", err)
 	}
 
+	// Allow mouse scroll to pass through to TUI apps (glow, vim, less, etc.)
+	// The smcup@:rmcup@ disables capture of alternate screen enter/exit sequences,
+	// letting applications handle their own scrolling instead of tmux entering copy-mode
+	// This is a server-level option (level "-s")
+	if err := m.tmux.SetOption("", "terminal-overrides", ",*:smcup@:rmcup@", "-s"); err != nil {
+		// Non-fatal, scroll may not work in TUI apps
+		fmt.Printf("Warning: could not set terminal-overrides: %v\n", err)
+	}
+
 	// Get the first window
 	windows, err := session.ListWindows()
 	if err != nil {
@@ -492,6 +501,107 @@ func (m *Manager) SetEnvironment(sessionName, key, value string) error {
 	cmd := exec.Command("tmux", "set-environment", "-t", sessionName, key, value)
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to set environment %s: %w (output: %s)", key, err, string(output))
+	}
+	return nil
+}
+
+// ConfigureStatusBar sets up the tmux status bar with workspace info and help hints.
+// This should be called during session creation and when mode changes.
+func (m *Manager) ConfigureStatusBar(sessionName, workspaceName, mode string) error {
+	// Extract just the workspace name if it has the planq- prefix
+	displayName := workspaceName
+
+	// Format mode for display (uppercase first letter)
+	displayMode := mode
+	if len(mode) > 0 {
+		displayMode = string(mode[0]-32) + mode[1:] // uppercase first char
+	}
+
+	// Status bar left: workspace name and mode
+	statusLeft := fmt.Sprintf(" [planq] %s │ %s ", displayName, displayMode)
+
+	// Status bar right: keybinding hints
+	statusRight := " ^B m: mode │ ^B ?: help "
+
+	// Set status bar options using tmux command
+	options := []struct {
+		key   string
+		value string
+	}{
+		{"status", "on"},
+		{"status-style", "bg=#1e1e2e,fg=#cdd6f4"},
+		{"status-left", statusLeft},
+		{"status-left-style", "bg=#89b4fa,fg=#1e1e2e,bold"},
+		{"status-left-length", "40"},
+		{"status-right", statusRight},
+		{"status-right-style", "bg=#313244,fg=#a6adc8"},
+		{"status-right-length", "40"},
+	}
+
+	for _, opt := range options {
+		cmd := exec.Command("tmux", "set-option", "-t", sessionName, opt.key, opt.value)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to set %s: %w (output: %s)", opt.key, err, string(output))
+		}
+	}
+
+	return nil
+}
+
+// ConfigurePaneBorders sets up pane borders with titles for better visibility.
+// This shows labeled borders around each pane (e.g., "Agent", "Plan", "Terminal").
+func (m *Manager) ConfigurePaneBorders(sessionName string) error {
+	// Set pane border options
+	options := []struct {
+		key   string
+		value string
+	}{
+		{"pane-border-status", "top"},
+		{"pane-border-format", " #{pane_title} "},
+		{"pane-border-style", "fg=#45475a"},
+		{"pane-active-border-style", "fg=#89b4fa"},
+	}
+
+	for _, opt := range options {
+		cmd := exec.Command("tmux", "set-option", "-t", sessionName, opt.key, opt.value)
+		if output, err := cmd.CombinedOutput(); err != nil {
+			return fmt.Errorf("failed to set %s: %w (output: %s)", opt.key, err, string(output))
+		}
+	}
+
+	return nil
+}
+
+// SetPaneTitle sets the title of a specific pane.
+func (m *Manager) SetPaneTitle(sessionName string, paneIndex int, title string) error {
+	target := fmt.Sprintf("%s:%d.%d", sessionName, 0, paneIndex)
+	cmd := exec.Command("tmux", "select-pane", "-t", target, "-T", title)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to set pane title: %w (output: %s)", err, string(output))
+	}
+	return nil
+}
+
+// ShowWelcomeBanner displays a welcome message with keybinding hints in a pane.
+func (m *Manager) ShowWelcomeBanner(sessionName string, paneIndex int, workspaceName string) error {
+	// Pad workspace name to fit in the banner (max 38 chars)
+	displayName := workspaceName
+	if len(displayName) > 38 {
+		displayName = displayName[:35] + "..."
+	}
+	// Pad to 38 chars
+	for len(displayName) < 38 {
+		displayName += " "
+	}
+
+	// Build the welcome banner as a single printf command
+	banner := fmt.Sprintf(`printf '\n╭───────────────────────────────────────────────────────────╮\n│  Planq Workspace: %s  │\n├───────────────────────────────────────────────────────────┤\n│  Essential keybindings (Prefix = Ctrl+B):                 │\n│                                                           │\n│  Ctrl+B m       Toggle plan/execute mode                  │\n│  Ctrl+B ←/→     Move between panes                        │\n│  Ctrl+B d       Detach (exit without closing)             │\n│  Ctrl+B ?       Show all tmux keybindings                 │\n│                                                           │\n│  Mouse is enabled - click panes to focus, drag to resize  │\n│                                                           │\n│  Run \"planq help tmux\" for more commands                  │\n╰───────────────────────────────────────────────────────────╯\n\n'`, displayName)
+
+	// Send the banner command to the pane
+	target := fmt.Sprintf("%s:%d.%d", sessionName, 0, paneIndex)
+	cmd := exec.Command("tmux", "send-keys", "-t", target, banner, "Enter")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to show welcome banner: %w (output: %s)", err, string(output))
 	}
 	return nil
 }
