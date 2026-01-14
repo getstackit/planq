@@ -227,12 +227,72 @@ func (m *Manager) GetSession(name string) (*gotmux.Session, error) {
 	return nil, fmt.Errorf("session %q not found", name)
 }
 
-// ReconfigureSession kills all panes and recreates the session with a new layout.
+// paneHasRunningProcess checks if a pane has a running foreground process (not just a shell).
+func (m *Manager) paneHasRunningProcess(sessionName string, paneIndex int) bool {
+	// Get the current command running in the pane
+	cmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_index}:#{pane_current_command}")
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+
+	// Parse the output to find our pane
+	lines := string(output)
+	for _, line := range splitLines(lines) {
+		if line == "" {
+			continue
+		}
+		// Parse "index:command" format
+		var idx int
+		var command string
+		if _, err := fmt.Sscanf(line, "%d:%s", &idx, &command); err != nil {
+			continue
+		}
+		if idx == paneIndex {
+			// Check if it's not just a shell
+			return !isShellCommand(command)
+		}
+	}
+	return false
+}
+
+// splitLines splits a string into lines.
+func splitLines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+// isShellCommand returns true if the command is a shell.
+func isShellCommand(cmd string) bool {
+	shells := []string{"bash", "zsh", "sh", "fish", "dash", "ksh", "tcsh", "csh"}
+	for _, shell := range shells {
+		if cmd == shell || cmd == "-"+shell {
+			return true
+		}
+	}
+	return false
+}
+
+// ReconfigureSession kills all panes except pane 0 and recreates the layout.
+// If pane 0 has a running process (like claude), it will not be restarted.
 func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout) error {
 	session, err := m.GetSession(name)
 	if err != nil {
 		return err
 	}
+
+	// Check if pane 0 has a running process before we do anything
+	pane0HasProcess := m.paneHasRunningProcess(name, 0)
 
 	// Get the window
 	windows, err := session.ListWindows()
@@ -307,6 +367,10 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 	for i, paneSpec := range layout.Panes {
 		if i >= len(panes) {
 			break
+		}
+		// Skip pane 0 if it already has a running process (like claude)
+		if i == 0 && pane0HasProcess {
+			continue
 		}
 		if paneSpec.Command != "" {
 			if err = panes[i].SendKeys(paneSpec.Command); err != nil {

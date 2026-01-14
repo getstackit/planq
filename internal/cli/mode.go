@@ -144,6 +144,19 @@ func reconfigureSession(name, workdir string, ws *workspace.Workspace, mode work
 		return fmt.Errorf("failed to initialize tmux: %w", err)
 	}
 
+	// Ensure the plan file exists before glow tries to display it
+	planFile := ws.PlanFile()
+	if _, err := os.Stat(planFile); os.IsNotExist(err) {
+		// Create the planq directory if needed
+		if err := os.MkdirAll(ws.PlanqDir(), 0755); err != nil {
+			return fmt.Errorf("failed to create planq directory: %w", err)
+		}
+		// Create empty plan file
+		if err := os.WriteFile(planFile, []byte{}, 0644); err != nil {
+			return fmt.Errorf("failed to create plan file: %w", err)
+		}
+	}
+
 	// Get the appropriate layout for the mode
 	agentCmd := ws.AgentCommand()
 	var layout tmux.Layout
@@ -152,7 +165,7 @@ func reconfigureSession(name, workdir string, ws *workspace.Workspace, mode work
 	case workspace.ModeExecute:
 		layout = tmux.ExecuteLayout(agentCmd)
 	default:
-		layout = tmux.PlanLayout(agentCmd, ws.PlanFile())
+		layout = tmux.PlanLayout(agentCmd, planFile)
 	}
 
 	fmt.Printf("Reconfiguring tmux session for %s mode...\n", mode)
