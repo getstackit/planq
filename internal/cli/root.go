@@ -31,4 +31,5 @@ func init() {
 	rootCmd.AddCommand(removeCmd)
 	rootCmd.AddCommand(modeCmd)
 	rootCmd.AddCommand(cleanCmd)
+	rootCmd.AddCommand(helpCmd)
 }

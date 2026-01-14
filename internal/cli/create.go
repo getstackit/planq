@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
+	"planq.dev/planq/internal/deps"
 	"planq.dev/planq/internal/stackit"
 	"planq.dev/planq/internal/tmux"
 	"planq.dev/planq/internal/workspace"
@@ -34,6 +35,18 @@ func init() {
 // createWorkspace creates a new workspace with worktree + tmux session.
 func createWorkspace(name, scope, agentCmd string, detach bool) error {
 	sessionName := sessionPrefix + name
+
+	// Validate dependencies before proceeding
+	validation := deps.Validate()
+	if !validation.AllRequiredMet {
+		fmt.Print(deps.FormatValidationResult(validation))
+		return fmt.Errorf("cannot create workspace: missing required dependencies")
+	}
+	if len(validation.MissingOptional) > 0 {
+		fmt.Print(deps.FormatValidationResult(validation))
+		fmt.Println("Continuing with limited functionality...")
+		fmt.Println()
+	}
 
 	fmt.Printf("Creating workspace %q...\n", name)
 
@@ -117,6 +130,29 @@ func createWorkspace(name, scope, agentCmd string, detach bool) error {
 	// Bind mode toggle keybinding (Ctrl-B m)
 	if err := tm.BindModeToggle(sessionName, name, workdir); err != nil {
 		fmt.Printf("  Warning: failed to bind mode toggle key: %v\n", err)
+	}
+
+	// Configure status bar with initial mode (plan)
+	if err := tm.ConfigureStatusBar(sessionName, name, "plan"); err != nil {
+		fmt.Printf("  Warning: failed to configure status bar: %v\n", err)
+	}
+
+	// Configure pane borders with titles
+	if err := tm.ConfigurePaneBorders(sessionName); err != nil {
+		fmt.Printf("  Warning: failed to configure pane borders: %v\n", err)
+	}
+
+	// Set pane titles for plan mode layout
+	paneTitles := []string{"Agent", "Plan", "Terminal"}
+	for i, title := range paneTitles {
+		if err := tm.SetPaneTitle(sessionName, i, title); err != nil {
+			fmt.Printf("  Warning: failed to set pane %d title: %v\n", i, err)
+		}
+	}
+
+	// Show welcome banner in the terminal pane (pane 2)
+	if err := tm.ShowWelcomeBanner(sessionName, 2, name); err != nil {
+		fmt.Printf("  Warning: failed to show welcome banner: %v\n", err)
 	}
 
 	fmt.Printf("  Session created: %s\n", session.Name)
