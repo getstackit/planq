@@ -30,3 +30,6 @@ planq
 .gocache/
 
 tmp/
+
+# Planq workspace state
+.planq/

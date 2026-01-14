@@ -3,6 +3,7 @@ package tmux
 
 import (
 	"fmt"
+	"os/exec"
 
 	"github.com/GianlucaP106/gotmux/gotmux"
 )
@@ -208,4 +209,134 @@ func (m *Manager) ListSessions(prefix string) ([]*gotmux.Session, error) {
 		}
 	}
 	return result, nil
+}
+
+// GetSession returns a session by name.
+func (m *Manager) GetSession(name string) (*gotmux.Session, error) {
+	sessions, err := m.tmux.ListSessions()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list sessions: %w", err)
+	}
+
+	for _, s := range sessions {
+		if s.Name == name {
+			return s, nil
+		}
+	}
+
+	return nil, fmt.Errorf("session %q not found", name)
+}
+
+// ReconfigureSession kills all panes and recreates the session with a new layout.
+func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout) error {
+	session, err := m.GetSession(name)
+	if err != nil {
+		return err
+	}
+
+	// Get the window
+	windows, err := session.ListWindows()
+	if err != nil {
+		return fmt.Errorf("failed to list windows: %w", err)
+	}
+	if len(windows) == 0 {
+		return fmt.Errorf("session has no windows")
+	}
+	window := windows[0]
+
+	// Kill all panes except pane 0
+	panes, err := window.ListPanes()
+	if err != nil {
+		return fmt.Errorf("failed to list panes: %w", err)
+	}
+
+	// Kill panes in reverse order to avoid index shifting issues
+	for i := len(panes) - 1; i > 0; i-- {
+		if err := panes[i].Kill(); err != nil {
+			return fmt.Errorf("failed to kill pane %d: %w", i, err)
+		}
+	}
+
+	// Now we have a single pane (pane 0). Create the layout from scratch.
+	panes, err = window.ListPanes()
+	if err != nil {
+		return fmt.Errorf("failed to list panes after cleanup: %w", err)
+	}
+	if len(panes) == 0 {
+		return fmt.Errorf("no panes remaining after cleanup")
+	}
+
+	// Create additional panes based on layout
+	mainPane := panes[0]
+
+	if len(layout.Panes) > 1 {
+		// Split horizontally for the right column
+		err = mainPane.SplitWindow(&gotmux.SplitWindowOptions{
+			SplitDirection: gotmux.PaneSplitDirectionHorizontal,
+			StartDirectory: workdir,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to split pane horizontally: %w", err)
+		}
+	}
+
+	if len(layout.Panes) > 2 {
+		// Get the right pane and split it vertically
+		panes, err = window.ListPanes()
+		if err != nil {
+			return fmt.Errorf("failed to list panes after first split: %w", err)
+		}
+		if len(panes) > 1 {
+			rightPane := panes[1]
+			err = rightPane.SplitWindow(&gotmux.SplitWindowOptions{
+				SplitDirection: gotmux.PaneSplitDirectionVertical,
+				StartDirectory: workdir,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to split pane vertically: %w", err)
+			}
+		}
+	}
+
+	// Get final list of panes and send commands
+	panes, err = window.ListPanes()
+	if err != nil {
+		return fmt.Errorf("failed to list final panes: %w", err)
+	}
+
+	for i, paneSpec := range layout.Panes {
+		if i >= len(panes) {
+			break
+		}
+		if paneSpec.Command != "" {
+			if err = panes[i].SendKeys(paneSpec.Command); err != nil {
+				return fmt.Errorf("failed to send command to pane %d: %w", i, err)
+			}
+			if err = panes[i].SendKeys("Enter"); err != nil {
+				return fmt.Errorf("failed to send Enter to pane %d: %w", i, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// BindModeToggle adds a keybinding (prefix + m) to toggle workspace mode.
+func (m *Manager) BindModeToggle(sessionName, workspaceName string) error {
+	// Bind 'm' key in this session to run planq mode toggle
+	cmd := exec.Command("tmux", "bind-key", "-t", sessionName, "m",
+		"run-shell", fmt.Sprintf("planq mode toggle --workspace %s", workspaceName))
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to bind mode toggle key: %w (output: %s)", err, string(output))
+	}
+	return nil
+}
+
+// SetEnvironment sets an environment variable in the tmux session.
+func (m *Manager) SetEnvironment(sessionName, key, value string) error {
+	cmd := exec.Command("tmux", "set-environment", "-t", sessionName, key, value)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("failed to set environment %s: %w (output: %s)", key, err, string(output))
+	}
+	return nil
 }
