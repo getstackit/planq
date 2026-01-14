@@ -74,9 +74,11 @@ func (w *Workspace) planAgentCommand() string {
 	planFile := w.PlanFile()
 	systemPrompt := fmt.Sprintf(
 		"You are in planning mode for the planq workspace %q. "+
-			"Do NOT make any code changes yet. Instead, write your implementation plan to %s. "+
-			"This file will be displayed in the artifacts pane. "+
-			"Once the user approves the plan, they will tell you to proceed with implementation.",
+			"You MUST write your implementation plan to %s. This is a REQUIREMENT. "+
+			"Do NOT make any code changes. Do NOT use any other file for planning. "+
+			"Read from and write to ONLY this plan file. "+
+			"This file will be displayed in the artifacts pane for user review. "+
+			"Wait for explicit user approval before proceeding with any implementation.",
 		w.Name,
 		planFile,
 	)

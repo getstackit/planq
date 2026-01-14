@@ -62,14 +62,14 @@ func loadWorkspace(name string) (*workspace.Workspace, string, error) {
 	return ws, workdir, nil
 }
 
-// showMode displays the current workspace mode.
+// showMode displays the current workspace mode and reapplies the layout.
 func showMode() error {
 	name, err := getWorkspaceName()
 	if err != nil {
 		return err
 	}
 
-	ws, _, err := loadWorkspace(name)
+	ws, workdir, err := loadWorkspace(name)
 	if err != nil {
 		return err
 	}
@@ -80,7 +80,9 @@ func showMode() error {
 	}
 
 	fmt.Printf("Workspace %q is in %s mode\n", name, mode)
-	return nil
+
+	// Always reapply layout in case the view is messed up
+	return reconfigureSession(name, workdir, ws, mode)
 }
 
 // switchMode switches to the specified mode or toggles.
@@ -121,15 +123,15 @@ func switchMode(target string) error {
 
 	if currentMode == newMode {
 		fmt.Printf("Workspace %q is already in %s mode\n", name, newMode)
-		return nil
+	} else {
+		// Set the new mode
+		if err := ws.SetMode(newMode); err != nil {
+			return fmt.Errorf("failed to set mode: %w", err)
+		}
+		fmt.Printf("Switched workspace %q to %s mode\n", name, newMode)
 	}
 
-	// Set the new mode
-	if err := ws.SetMode(newMode); err != nil {
-		return fmt.Errorf("failed to set mode: %w", err)
-	}
-
-	fmt.Printf("Switched workspace %q to %s mode\n", name, newMode)
+	// Always reapply layout in case the view is messed up
 	return reconfigureSession(name, workdir, ws, newMode)
 }
 
