@@ -81,6 +81,12 @@ func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*go
 		return nil, fmt.Errorf("failed to create session %q: %w", name, err)
 	}
 
+	// Enable mouse support
+	if err := session.SetOption("mouse", "on"); err != nil {
+		// Non-fatal, continue without mouse support
+		fmt.Printf("Warning: could not enable mouse support: %v\n", err)
+	}
+
 	// Get the first window
 	windows, err := session.ListWindows()
 	if err != nil {

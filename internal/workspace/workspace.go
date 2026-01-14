@@ -54,10 +54,11 @@ func (w *Workspace) AgentCommand() string {
 	planFile := w.PlanFile()
 	systemPrompt := fmt.Sprintf(
 		"You are in planning mode for the planq workspace %q. "+
-			"Write your implementation plan to %s. "+
-			"This file will be displayed in the artifacts pane.",
+			"Do NOT make any code changes yet. Instead, write your implementation plan to %s. "+
+			"This file will be displayed in the artifacts pane. "+
+			"Once the user approves the plan, they will tell you to proceed with implementation.",
 		w.Name,
 		planFile,
 	)
-	return fmt.Sprintf("claude -p --append-system-prompt %q", systemPrompt)
+	return fmt.Sprintf("claude --append-system-prompt %q", systemPrompt)
 }
