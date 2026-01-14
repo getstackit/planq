@@ -104,6 +104,16 @@ func createWorkspace(name, scope, agentCmd string, detach bool) error {
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
 
+	// Set PLANQ_WORKSPACE environment variable in the session
+	if err := tm.SetEnvironment(sessionName, "PLANQ_WORKSPACE", name); err != nil {
+		fmt.Printf("  Warning: failed to set PLANQ_WORKSPACE: %v\n", err)
+	}
+
+	// Bind mode toggle keybinding (Ctrl-B m)
+	if err := tm.BindModeToggle(sessionName, name); err != nil {
+		fmt.Printf("  Warning: failed to bind mode toggle key: %v\n", err)
+	}
+
 	fmt.Printf("  Session created: %s\n", session.Name)
 	fmt.Println()
 	fmt.Printf("Workspace %q created successfully!\n", name)
