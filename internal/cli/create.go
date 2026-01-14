@@ -6,11 +6,13 @@ import (
 	"github.com/spf13/cobra"
 	"planq.dev/planq/internal/stackit"
 	"planq.dev/planq/internal/tmux"
+	"planq.dev/planq/internal/workspace"
 )
 
 var (
 	createScope    string
 	createAgentCmd string
+	createDetach   bool
 )
 
 var createCmd = &cobra.Command{
@@ -19,17 +21,18 @@ var createCmd = &cobra.Command{
 	Long:  `Create a new workspace with a git worktree and tmux session.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return createWorkspace(args[0], createScope, createAgentCmd)
+		return createWorkspace(args[0], createScope, createAgentCmd, createDetach)
 	},
 }
 
 func init() {
 	createCmd.Flags().StringVarP(&createScope, "scope", "s", "", "Scope for worktree (optional)")
 	createCmd.Flags().StringVarP(&createAgentCmd, "agent-cmd", "a", "", "Command to run in agent pane (default: claude)")
+	createCmd.Flags().BoolVarP(&createDetach, "detach", "d", false, "Create workspace without opening it")
 }
 
 // createWorkspace creates a new workspace with worktree + tmux session.
-func createWorkspace(name, scope, agentCmd string) error {
+func createWorkspace(name, scope, agentCmd string, detach bool) error {
 	sessionName := sessionPrefix + name
 
 	fmt.Printf("Creating workspace %q...\n", name)
@@ -62,18 +65,35 @@ func createWorkspace(name, scope, agentCmd string) error {
 	}
 	fmt.Printf("  Worktree created at: %s\n", workdir)
 
-	// Determine agent command
-	if agentCmd == "" {
-		agentCmd = "claude" // Default to claude
+	// Create workspace and initialize .planq directory
+	ws := &workspace.Workspace{
+		Name:         name,
+		WorktreePath: workdir,
+	}
+
+	fmt.Printf("  Initializing .planq directory...\n")
+	if err := ws.InitPlanqDir(); err != nil {
+		// Cleanup worktree if .planq creation fails
+		_ = st.WorktreeRemove(name)
+		return fmt.Errorf("failed to initialize .planq directory: %w", err)
+	}
+	fmt.Printf("  Plan file will be at: %s\n", ws.PlanFile())
+
+	// Determine agent command (use workspace default unless overridden)
+	finalAgentCmd := ws.AgentCommand()
+	if agentCmd != "" {
+		finalAgentCmd = agentCmd
 	}
 
 	// Create tmux session with layout
+	// Layout: agent (left), plan viewer (top-right), terminal (bottom-right)
 	fmt.Printf("  Creating tmux session %q...\n", sessionName)
 	layout := tmux.Layout{
-		Name: "agent-artifact",
+		Name: "agent-plan-terminal",
 		Panes: []tmux.PaneSpec{
-			{Name: "agent", Size: 70, Command: agentCmd},
-			{Name: "artifacts", Size: 30, Command: fmt.Sprintf("watch -n 2 'ls -la %s'", workdir)},
+			{Name: "agent", Size: 60, Command: finalAgentCmd},
+			{Name: "plan", Size: 20, Command: fmt.Sprintf("glow %s --tui", ws.PlanFile())},
+			{Name: "terminal", Size: 20, Command: ""},
 		},
 	}
 
@@ -87,8 +107,15 @@ func createWorkspace(name, scope, agentCmd string) error {
 	fmt.Printf("  Session created: %s\n", session.Name)
 	fmt.Println()
 	fmt.Printf("Workspace %q created successfully!\n", name)
-	fmt.Println()
-	fmt.Printf("To open: planq open %s\n", name)
 
-	return nil
+	if detach {
+		fmt.Println()
+		fmt.Printf("To open: planq open %s\n", name)
+		return nil
+	}
+
+	// Attach to the session
+	fmt.Println()
+	fmt.Println("Opening workspace...")
+	return tm.AttachSession(sessionName)
 }

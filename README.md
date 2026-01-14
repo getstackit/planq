@@ -1,5 +1,7 @@
 # Planq
 
+> **Note:** This project is a work in progress. APIs and features may change.
+
 A Go CLI for orchestrating parallel AI agent workspaces using git worktrees and tmux.
 
 ## Concept

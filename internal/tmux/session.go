@@ -64,6 +64,13 @@ func (m *Manager) SessionExists(name string) (bool, error) {
 }
 
 // CreateSession creates a new tmux session with the given layout.
+// Layout with 3 panes creates:
+//
+//	+----------------+--------+
+//	|                |  pane1 |
+//	|    pane0       +--------+
+//	|                |  pane2 |
+//	+----------------+--------+
 func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*gotmux.Session, error) {
 	// Create the session
 	session, err := m.tmux.NewSession(&gotmux.SessionOptions{
@@ -84,57 +91,64 @@ func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*go
 	}
 	window := windows[0]
 
-	// If we have more than one pane defined, split the window
+	// Get the main pane
+	panes, err := window.ListPanes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list panes: %w", err)
+	}
+	if len(panes) == 0 {
+		return nil, fmt.Errorf("window has no panes")
+	}
+
+	// Create additional panes based on layout
 	if len(layout.Panes) > 1 {
-		// Get the main pane
-		panes, err := window.ListPanes()
-		if err != nil {
-			return nil, fmt.Errorf("failed to list panes: %w", err)
-		}
-		if len(panes) == 0 {
-			return nil, fmt.Errorf("window has no panes")
-		}
 		mainPane := panes[0]
 
-		// Split for the second pane (artifacts) - horizontal means side by side
+		// Split horizontally (side by side) for the right column
 		err = mainPane.SplitWindow(&gotmux.SplitWindowOptions{
 			SplitDirection: gotmux.PaneSplitDirectionHorizontal,
 			StartDirectory: workdir,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to split pane: %w", err)
+			return nil, fmt.Errorf("failed to split pane horizontally: %w", err)
 		}
+	}
 
-		// Get the new pane (should be the second one now)
+	if len(layout.Panes) > 2 {
+		// Get the right pane (pane 1) and split it vertically (top/bottom)
 		panes, err = window.ListPanes()
 		if err != nil {
-			return nil, fmt.Errorf("failed to list panes after split: %w", err)
+			return nil, fmt.Errorf("failed to list panes after first split: %w", err)
 		}
-
-		// Send command to artifact pane if specified
-		if len(panes) > 1 && len(layout.Panes) > 1 && layout.Panes[1].Command != "" {
-			artifactPane := panes[1]
-			if err = artifactPane.SendKeys(layout.Panes[1].Command); err != nil {
-				return nil, fmt.Errorf("failed to send command to artifact pane: %w", err)
-			}
-			if err = artifactPane.SendKeys("Enter"); err != nil {
-				return nil, fmt.Errorf("failed to send Enter to artifact pane: %w", err)
+		if len(panes) > 1 {
+			rightPane := panes[1]
+			err = rightPane.SplitWindow(&gotmux.SplitWindowOptions{
+				SplitDirection: gotmux.PaneSplitDirectionVertical,
+				StartDirectory: workdir,
+			})
+			if err != nil {
+				return nil, fmt.Errorf("failed to split pane vertically: %w", err)
 			}
 		}
 	}
 
-	// Send command to main pane if specified
-	if len(layout.Panes) > 0 && layout.Panes[0].Command != "" {
-		panes, err := window.ListPanes()
-		if err != nil {
-			return nil, fmt.Errorf("failed to list panes: %w", err)
+	// Get final list of panes
+	panes, err = window.ListPanes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list final panes: %w", err)
+	}
+
+	// Send commands to each pane
+	for i, paneSpec := range layout.Panes {
+		if i >= len(panes) {
+			break
 		}
-		if len(panes) > 0 {
-			if err = panes[0].SendKeys(layout.Panes[0].Command); err != nil {
-				return nil, fmt.Errorf("failed to send command to main pane: %w", err)
+		if paneSpec.Command != "" {
+			if err = panes[i].SendKeys(paneSpec.Command); err != nil {
+				return nil, fmt.Errorf("failed to send command to pane %d: %w", i, err)
 			}
-			if err = panes[0].SendKeys("Enter"); err != nil {
-				return nil, fmt.Errorf("failed to send Enter to main pane: %w", err)
+			if err = panes[i].SendKeys("Enter"); err != nil {
+				return nil, fmt.Errorf("failed to send Enter to pane %d: %w", i, err)
 			}
 		}
 	}
