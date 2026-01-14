@@ -227,30 +227,45 @@ func (m *Manager) GetSession(name string) (*gotmux.Session, error) {
 	return nil, fmt.Errorf("session %q not found", name)
 }
 
-// paneHasRunningProcess checks if a pane has a running foreground process (not just a shell).
-func (m *Manager) paneHasRunningProcess(sessionName string, paneIndex int) bool {
-	// Get the current command running in the pane
+// paneInfo holds information about a pane's current state.
+type paneInfo struct {
+	index   int
+	command string
+}
+
+// getPaneInfo returns information about all panes in a session.
+func (m *Manager) getPaneInfo(sessionName string) ([]paneInfo, error) {
 	cmd := exec.Command("tmux", "list-panes", "-t", sessionName, "-F", "#{pane_index}:#{pane_current_command}")
 	output, err := cmd.Output()
 	if err != nil {
-		return false
+		return nil, err
 	}
 
-	// Parse the output to find our pane
-	lines := string(output)
-	for _, line := range splitLines(lines) {
+	var panes []paneInfo
+	for _, line := range splitLines(string(output)) {
 		if line == "" {
 			continue
 		}
-		// Parse "index:command" format
 		var idx int
 		var command string
 		if _, err := fmt.Sscanf(line, "%d:%s", &idx, &command); err != nil {
 			continue
 		}
-		if idx == paneIndex {
-			// Check if it's not just a shell
-			return !isShellCommand(command)
+		panes = append(panes, paneInfo{index: idx, command: command})
+	}
+	return panes, nil
+}
+
+// paneHasRunningProcess checks if a pane has a running foreground process (not just a shell).
+func (m *Manager) paneHasRunningProcess(sessionName string, paneIndex int) bool {
+	panes, err := m.getPaneInfo(sessionName)
+	if err != nil {
+		return false
+	}
+
+	for _, p := range panes {
+		if p.index == paneIndex {
+			return !isShellCommand(p.command)
 		}
 	}
 	return false
@@ -283,12 +298,71 @@ func isShellCommand(cmd string) bool {
 	return false
 }
 
-// ReconfigureSession kills all panes except pane 0 and recreates the layout.
+// layoutMatches checks if the current pane layout matches the target layout.
+// Returns true if no reconfiguration is needed.
+func (m *Manager) layoutMatches(sessionName string, layout Layout) bool {
+	panes, err := m.getPaneInfo(sessionName)
+	if err != nil {
+		return false
+	}
+
+	// Check pane count matches
+	if len(panes) != len(layout.Panes) {
+		return false
+	}
+
+	// Build a map of pane index -> command for easier lookup
+	paneByIndex := make(map[int]string)
+	for _, p := range panes {
+		paneByIndex[p.index] = p.command
+	}
+
+	// Check each pane has the expected process running
+	for i, spec := range layout.Panes {
+		cmd, exists := paneByIndex[i]
+		if !exists {
+			return false
+		}
+
+		// Check if pane matches expectations based on its type
+		switch spec.Name {
+		case "agent":
+			// Agent pane should have a non-shell process running
+			// (claude shows up as version number like "2.1.7" or as "node" or "claude")
+			if isShellCommand(cmd) {
+				return false
+			}
+		case "plan":
+			// Plan pane should be running glow
+			if cmd != "glow" {
+				return false
+			}
+		case "terminal":
+			// Terminal can be any shell - no specific requirement
+		default:
+			// Unknown pane type - if it has a command, check it's running something
+			if spec.Command != "" && isShellCommand(cmd) {
+				return false
+			}
+		}
+	}
+
+	return true
+}
+
+// ReconfigureSession reconfigures the session to match the target layout.
+// This is idempotent - if the layout already matches, no changes are made.
 // If pane 0 has a running process (like claude), it will not be restarted.
-func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout) error {
+// Returns true if changes were made, false if layout already matched.
+func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout) (bool, error) {
+	// Check if layout already matches - if so, no reconfiguration needed
+	if m.layoutMatches(name, layout) {
+		return false, nil
+	}
+
 	session, err := m.GetSession(name)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	// Check if pane 0 has a running process before we do anything
@@ -297,33 +371,33 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 	// Get the window
 	windows, err := session.ListWindows()
 	if err != nil {
-		return fmt.Errorf("failed to list windows: %w", err)
+		return false, fmt.Errorf("failed to list windows: %w", err)
 	}
 	if len(windows) == 0 {
-		return fmt.Errorf("session has no windows")
+		return false, fmt.Errorf("session has no windows")
 	}
 	window := windows[0]
 
 	// Kill all panes except pane 0
 	panes, err := window.ListPanes()
 	if err != nil {
-		return fmt.Errorf("failed to list panes: %w", err)
+		return false, fmt.Errorf("failed to list panes: %w", err)
 	}
 
 	// Kill panes in reverse order to avoid index shifting issues
 	for i := len(panes) - 1; i > 0; i-- {
 		if err := panes[i].Kill(); err != nil {
-			return fmt.Errorf("failed to kill pane %d: %w", i, err)
+			return false, fmt.Errorf("failed to kill pane %d: %w", i, err)
 		}
 	}
 
 	// Now we have a single pane (pane 0). Create the layout from scratch.
 	panes, err = window.ListPanes()
 	if err != nil {
-		return fmt.Errorf("failed to list panes after cleanup: %w", err)
+		return false, fmt.Errorf("failed to list panes after cleanup: %w", err)
 	}
 	if len(panes) == 0 {
-		return fmt.Errorf("no panes remaining after cleanup")
+		return false, fmt.Errorf("no panes remaining after cleanup")
 	}
 
 	// Create additional panes based on layout
@@ -336,7 +410,7 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 			StartDirectory: workdir,
 		})
 		if err != nil {
-			return fmt.Errorf("failed to split pane horizontally: %w", err)
+			return false, fmt.Errorf("failed to split pane horizontally: %w", err)
 		}
 	}
 
@@ -344,7 +418,7 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 		// Get the right pane and split it vertically
 		panes, err = window.ListPanes()
 		if err != nil {
-			return fmt.Errorf("failed to list panes after first split: %w", err)
+			return false, fmt.Errorf("failed to list panes after first split: %w", err)
 		}
 		if len(panes) > 1 {
 			rightPane := panes[1]
@@ -353,7 +427,7 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 				StartDirectory: workdir,
 			})
 			if err != nil {
-				return fmt.Errorf("failed to split pane vertically: %w", err)
+				return false, fmt.Errorf("failed to split pane vertically: %w", err)
 			}
 		}
 	}
@@ -361,7 +435,7 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 	// Get final list of panes and send commands
 	panes, err = window.ListPanes()
 	if err != nil {
-		return fmt.Errorf("failed to list final panes: %w", err)
+		return false, fmt.Errorf("failed to list final panes: %w", err)
 	}
 
 	for i, paneSpec := range layout.Panes {
@@ -374,22 +448,22 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 		}
 		if paneSpec.Command != "" {
 			if err = panes[i].SendKeys(paneSpec.Command); err != nil {
-				return fmt.Errorf("failed to send command to pane %d: %w", i, err)
+				return false, fmt.Errorf("failed to send command to pane %d: %w", i, err)
 			}
 			if err = panes[i].SendKeys("Enter"); err != nil {
-				return fmt.Errorf("failed to send Enter to pane %d: %w", i, err)
+				return false, fmt.Errorf("failed to send Enter to pane %d: %w", i, err)
 			}
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // BindModeToggle adds a keybinding (prefix + m) to toggle workspace mode.
-func (m *Manager) BindModeToggle(sessionName, workspaceName string) error {
+func (m *Manager) BindModeToggle(sessionName, workspaceName, worktreePath string) error {
 	// Bind 'm' key in this session to run planq mode toggle
 	cmd := exec.Command("tmux", "bind-key", "-t", sessionName, "m",
-		"run-shell", fmt.Sprintf("planq mode toggle --workspace %s", workspaceName))
+		"run-shell", fmt.Sprintf("planq mode toggle --workspace %s --worktree %s", workspaceName, worktreePath))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to bind mode toggle key: %w (output: %s)", err, string(output))
 	}

@@ -109,8 +109,13 @@ func createWorkspace(name, scope, agentCmd string, detach bool) error {
 		fmt.Printf("  Warning: failed to set PLANQ_WORKSPACE: %v\n", err)
 	}
 
+	// Set PLANQ_WORKTREE_PATH environment variable in the session
+	if err := tm.SetEnvironment(sessionName, "PLANQ_WORKTREE_PATH", workdir); err != nil {
+		fmt.Printf("  Warning: failed to set PLANQ_WORKTREE_PATH: %v\n", err)
+	}
+
 	// Bind mode toggle keybinding (Ctrl-B m)
-	if err := tm.BindModeToggle(sessionName, name); err != nil {
+	if err := tm.BindModeToggle(sessionName, name, workdir); err != nil {
 		fmt.Printf("  Warning: failed to bind mode toggle key: %v\n", err)
 	}
 

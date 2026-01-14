@@ -10,6 +10,7 @@ import (
 )
 
 var modeWorkspace string
+var modeWorktree string
 
 var modeCmd = &cobra.Command{
 	Use:   "mode [plan|execute|toggle]",
@@ -30,6 +31,7 @@ With 'toggle', switches to the opposite mode.`,
 
 func init() {
 	modeCmd.Flags().StringVarP(&modeWorkspace, "workspace", "w", "", "Workspace name (default: detect from environment)")
+	modeCmd.Flags().StringVar(&modeWorktree, "worktree", "", "Worktree path (default: detect from environment or cwd)")
 }
 
 // getWorkspaceName returns the workspace name from flag or environment.
@@ -46,12 +48,27 @@ func getWorkspaceName() (string, error) {
 	return "", fmt.Errorf("workspace name required: use --workspace flag or set PLANQ_WORKSPACE")
 }
 
+// getWorktreePath returns the worktree path from flag, environment, or cwd.
+func getWorktreePath() (string, error) {
+	// First, check the flag
+	if modeWorktree != "" {
+		return modeWorktree, nil
+	}
+
+	// Second, check environment variable
+	if path := os.Getenv("PLANQ_WORKTREE_PATH"); path != "" {
+		return path, nil
+	}
+
+	// Finally, fall back to current working directory
+	return os.Getwd()
+}
+
 // loadWorkspace loads a workspace by name.
 func loadWorkspace(name string) (*workspace.Workspace, string, error) {
-	// The workspace path is the current working directory when running inside a planq session
-	workdir, err := os.Getwd()
+	workdir, err := getWorktreePath()
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to get working directory: %w", err)
+		return nil, "", fmt.Errorf("failed to get worktree path: %w", err)
 	}
 
 	ws := &workspace.Workspace{
@@ -168,9 +185,15 @@ func reconfigureSession(name, workdir string, ws *workspace.Workspace, mode work
 		layout = tmux.PlanLayout(agentCmd, planFile)
 	}
 
-	fmt.Printf("Reconfiguring tmux session for %s mode...\n", mode)
-	if err := tm.ReconfigureSession(sessionName, workdir, layout); err != nil {
+	changed, err := tm.ReconfigureSession(sessionName, workdir, layout)
+	if err != nil {
 		return fmt.Errorf("failed to reconfigure session: %w", err)
+	}
+
+	if changed {
+		fmt.Printf("Reconfigured tmux session for %s mode\n", mode)
+	} else {
+		fmt.Printf("Layout already matches %s mode, no changes needed\n", mode)
 	}
 
 	return nil
