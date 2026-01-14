@@ -337,6 +337,11 @@ func (m *Manager) layoutMatches(sessionName string, layout Layout) bool {
 			if cmd != "glow" {
 				return false
 			}
+		case "diff":
+			// Diff pane should be running watch (for git diff)
+			if cmd != "watch" {
+				return false
+			}
 		case "terminal":
 			// Terminal can be any shell - no specific requirement
 		default:

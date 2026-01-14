@@ -17,13 +17,14 @@ func PlanLayout(agentCmd, planFile string) Layout {
 }
 
 // ExecuteLayout returns the layout for execute mode.
-// Single full-width pane for focused implementation.
+// 2-pane layout: agent (left, 50%) + git diff viewer (right, 50%)
 func ExecuteLayout(agentCmd string) Layout {
 	return Layout{
 		Name:        "execute",
-		Description: "Execution mode: full-width agent",
+		Description: "Execution mode: agent + git diff",
 		Panes: []PaneSpec{
-			{Name: "agent", Size: 100, Command: agentCmd},
+			{Name: "agent", Size: 50, Command: agentCmd},
+			{Name: "diff", Size: 50, Command: "watch -c -n 2 'git diff --color=always | delta --paging=never'"},
 		},
 	}
 }
