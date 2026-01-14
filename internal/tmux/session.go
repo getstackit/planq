@@ -446,6 +446,19 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 		if i == 0 && pane0HasProcess {
 			continue
 		}
+
+		// Always cd to workdir first to ensure correct working directory
+		// This is more reliable than StartDirectory alone
+		if i > 0 {
+			cdCmd := fmt.Sprintf("cd '%s'", workdir)
+			if err = panes[i].SendKeys(cdCmd); err != nil {
+				return false, fmt.Errorf("failed to send cd to pane %d: %w", i, err)
+			}
+			if err = panes[i].SendKeys("Enter"); err != nil {
+				return false, fmt.Errorf("failed to send Enter after cd to pane %d: %w", i, err)
+			}
+		}
+
 		if paneSpec.Command != "" {
 			if err = panes[i].SendKeys(paneSpec.Command); err != nil {
 				return false, fmt.Errorf("failed to send command to pane %d: %w", i, err)
@@ -462,8 +475,9 @@ func (m *Manager) ReconfigureSession(name string, workdir string, layout Layout)
 // BindModeToggle adds a keybinding (prefix + m) to toggle workspace mode.
 func (m *Manager) BindModeToggle(sessionName, workspaceName, worktreePath string) error {
 	// Bind 'm' key in this session to run planq mode toggle
+	// Quote the worktree path to handle spaces
 	cmd := exec.Command("tmux", "bind-key", "-t", sessionName, "m",
-		"run-shell", fmt.Sprintf("planq mode toggle --workspace %s --worktree %s", workspaceName, worktreePath))
+		"run-shell", fmt.Sprintf("planq mode toggle --workspace '%s' --worktree '%s'", workspaceName, worktreePath))
 	if output, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("failed to bind mode toggle key: %w (output: %s)", err, string(output))
 	}
