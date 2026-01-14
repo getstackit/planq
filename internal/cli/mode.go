@@ -3,6 +3,8 @@ package cli
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"planq.dev/planq/internal/tmux"
@@ -48,14 +50,37 @@ func getWorkspaceName() (string, error) {
 	return "", fmt.Errorf("workspace name required: use --workspace flag or set PLANQ_WORKSPACE")
 }
 
-// getWorktreePath returns the worktree path from flag, environment, or cwd.
-func getWorktreePath() (string, error) {
+// getTmuxSessionEnv reads an environment variable from a tmux session.
+func getTmuxSessionEnv(sessionName, varName string) (string, error) {
+	cmd := exec.Command("tmux", "show-environment", "-t", sessionName, varName)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+
+	// Output format is "VAR=value\n"
+	line := strings.TrimSpace(string(output))
+	parts := strings.SplitN(line, "=", 2)
+	if len(parts) != 2 {
+		return "", fmt.Errorf("unexpected format: %s", line)
+	}
+	return parts[1], nil
+}
+
+// getWorktreePath returns the worktree path from flag, tmux session env, process env, or cwd.
+func getWorktreePath(workspaceName string) (string, error) {
 	// First, check the flag
 	if modeWorktree != "" {
 		return modeWorktree, nil
 	}
 
-	// Second, check environment variable
+	// Second, check tmux session environment variable
+	sessionName := sessionPrefix + workspaceName
+	if path, err := getTmuxSessionEnv(sessionName, "PLANQ_WORKTREE_PATH"); err == nil && path != "" {
+		return path, nil
+	}
+
+	// Third, check process environment variable
 	if path := os.Getenv("PLANQ_WORKTREE_PATH"); path != "" {
 		return path, nil
 	}
@@ -66,7 +91,7 @@ func getWorktreePath() (string, error) {
 
 // loadWorkspace loads a workspace by name.
 func loadWorkspace(name string) (*workspace.Workspace, string, error) {
-	workdir, err := getWorktreePath()
+	workdir, err := getWorktreePath(name)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to get worktree path: %w", err)
 	}
