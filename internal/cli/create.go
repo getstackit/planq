@@ -5,7 +5,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"planq.dev/planq/internal/deps"
+	"planq.dev/planq/internal/git"
 	"planq.dev/planq/internal/stackit"
+	"planq.dev/planq/internal/state"
 	"planq.dev/planq/internal/tmux"
 	"planq.dev/planq/internal/workspace"
 )
@@ -14,6 +16,7 @@ var (
 	createScope    string
 	createAgentCmd string
 	createDetach   bool
+	createMain     bool
 )
 
 var createCmd = &cobra.Command{
@@ -22,7 +25,7 @@ var createCmd = &cobra.Command{
 	Long:  `Create a new workspace with a git worktree and tmux session.`,
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		return createWorkspace(args[0], createScope, createAgentCmd, createDetach)
+		return createWorkspace(args[0], createScope, createAgentCmd, createDetach, createMain)
 	},
 }
 
@@ -30,10 +33,11 @@ func init() {
 	createCmd.Flags().StringVarP(&createScope, "scope", "s", "", "Scope for worktree (optional)")
 	createCmd.Flags().StringVarP(&createAgentCmd, "agent-cmd", "a", "", "Command to run in agent pane (default: claude)")
 	createCmd.Flags().BoolVarP(&createDetach, "detach", "d", false, "Create workspace without opening it")
+	createCmd.Flags().BoolVar(&createMain, "main", false, "Use main worktree instead of creating a new one (for testing)")
 }
 
 // createWorkspace creates a new workspace with worktree + tmux session.
-func createWorkspace(name, scope, agentCmd string, detach bool) error {
+func createWorkspace(name, scope, agentCmd string, detach, useMain bool) error {
 	sessionName := sessionPrefix + name
 
 	// Validate dependencies before proceeding
@@ -64,19 +68,52 @@ func createWorkspace(name, scope, agentCmd string, detach bool) error {
 		return fmt.Errorf("session %q already exists, use 'planq open %s' to open it", sessionName, name)
 	}
 
-	// Create worktree via stackit
-	fmt.Printf("  Creating worktree via stackit...\n")
+	var workdir string
+	var isMainWorkspace bool
 	st := stackit.NewClient()
-	if err := st.WorktreeCreate(name, scope); err != nil {
-		return fmt.Errorf("failed to create worktree: %w", err)
-	}
 
-	// Get worktree path
-	workdir, err := st.WorktreeOpen(name)
-	if err != nil {
-		return fmt.Errorf("failed to get worktree path: %w", err)
+	if useMain {
+		// Create workspace using main worktree
+		repoRoot, err := git.GetRepoRoot()
+		if err != nil {
+			return fmt.Errorf("failed to get repository root: %w", err)
+		}
+
+		// Check if a main workspace already exists for this repo
+		globalState, err := state.Load()
+		if err != nil {
+			return fmt.Errorf("failed to load global state: %w", err)
+		}
+
+		if existing, exists := globalState.GetMainWorkspace(repoRoot); exists {
+			return fmt.Errorf("main workspace %q already exists for this repository; remove it first with 'planq remove %s'", existing.Name, existing.Name)
+		}
+
+		workdir = repoRoot
+		isMainWorkspace = true
+
+		fmt.Printf("  Using main worktree at: %s\n", workdir)
+
+		// Record in global state
+		globalState.SetMainWorkspace(repoRoot, name)
+		if err := globalState.Save(); err != nil {
+			return fmt.Errorf("failed to save global state: %w", err)
+		}
+	} else {
+		// Create worktree via stackit
+		fmt.Printf("  Creating worktree via stackit...\n")
+		if err := st.WorktreeCreate(name, scope); err != nil {
+			return fmt.Errorf("failed to create worktree: %w", err)
+		}
+
+		// Get worktree path
+		var err error
+		workdir, err = st.WorktreeOpen(name)
+		if err != nil {
+			return fmt.Errorf("failed to get worktree path: %w", err)
+		}
+		fmt.Printf("  Worktree created at: %s\n", workdir)
 	}
-	fmt.Printf("  Worktree created at: %s\n", workdir)
 
 	// Create workspace and initialize .planq directory
 	ws := &workspace.Workspace{
@@ -86,8 +123,16 @@ func createWorkspace(name, scope, agentCmd string, detach bool) error {
 
 	fmt.Printf("  Initializing .planq directory...\n")
 	if err := ws.InitPlanqDir(); err != nil {
-		// Cleanup worktree if .planq creation fails
-		_ = st.WorktreeRemove(name)
+		// Cleanup on failure
+		if !isMainWorkspace {
+			_ = st.WorktreeRemove(name)
+		} else {
+			// Remove state entry for main workspace
+			if globalState, err := state.Load(); err == nil {
+				globalState.RemoveMainWorkspace(workdir)
+				_ = globalState.Save()
+			}
+		}
 		return fmt.Errorf("failed to initialize .planq directory: %w", err)
 	}
 	fmt.Printf("  Plan file will be at: %s\n", ws.PlanFile())
@@ -112,8 +157,16 @@ func createWorkspace(name, scope, agentCmd string, detach bool) error {
 
 	session, err := tm.CreateSession(sessionName, workdir, layout)
 	if err != nil {
-		// Cleanup worktree if session creation fails
-		_ = st.WorktreeRemove(name)
+		// Cleanup on failure
+		if !isMainWorkspace {
+			_ = st.WorktreeRemove(name)
+		} else {
+			// Remove state entry for main workspace
+			if globalState, err := state.Load(); err == nil {
+				globalState.RemoveMainWorkspace(workdir)
+				_ = globalState.Save()
+			}
+		}
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
 
