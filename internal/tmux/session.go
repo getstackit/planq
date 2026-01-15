@@ -64,6 +64,48 @@ func (m *Manager) SessionExists(name string) (bool, error) {
 	return false, nil
 }
 
+// IsSessionAttached checks if a tmux session is currently attached (has a client viewing it).
+func (m *Manager) IsSessionAttached(name string) (bool, error) {
+	cmd := exec.Command("tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}")
+	output, err := cmd.Output()
+	if err != nil {
+		return false, nil // tmux not running or no sessions
+	}
+
+	for _, line := range splitLines(string(output)) {
+		if line == "" {
+			continue
+		}
+		// Parse "session_name:attached_count"
+		var sessionName string
+		var attached int
+		if _, err := fmt.Sscanf(line, "%s", &sessionName); err != nil {
+			continue
+		}
+		// Split on last colon to handle session names with colons
+		lastColon := -1
+		for i := len(line) - 1; i >= 0; i-- {
+			if line[i] == ':' {
+				lastColon = i
+				break
+			}
+		}
+		if lastColon == -1 {
+			continue
+		}
+		sessionName = line[:lastColon]
+		if _, err := fmt.Sscanf(line[lastColon+1:], "%d", &attached); err != nil {
+			continue
+		}
+
+		if sessionName == name {
+			return attached > 0, nil
+		}
+	}
+
+	return false, nil
+}
+
 // CreateSession creates a new tmux session with the given layout.
 // Layout with 3 panes creates:
 //

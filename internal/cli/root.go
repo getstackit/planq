@@ -32,4 +32,5 @@ func init() {
 	rootCmd.AddCommand(modeCmd)
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(helpCmd)
+	rootCmd.AddCommand(notifyCmd)
 }

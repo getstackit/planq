@@ -20,6 +20,7 @@ var (
 	colorInactive = lipgloss.Color("#6c7086") // gray
 	colorOrphaned = lipgloss.Color("#f38ba8") // red
 	colorMain     = lipgloss.Color("#89b4fa") // blue
+	colorReview   = lipgloss.Color("#f9e2af") // yellow
 	colorText     = lipgloss.Color("#cdd6f4") // light text
 	colorMuted    = lipgloss.Color("#6c7086") // muted text
 	colorBorder   = lipgloss.Color("#45475a") // border
@@ -71,6 +72,10 @@ var (
 			Foreground(colorMain).
 			Bold(true)
 
+	reviewBadgeStyle = lipgloss.NewStyle().
+				Foreground(colorReview).
+				Bold(true)
+
 	summaryStyle = lipgloss.NewStyle().
 			Foreground(colorMuted).
 			MarginTop(1)
@@ -91,12 +96,13 @@ var listCmd = &cobra.Command{
 
 // workspaceEntry represents a combined workspace entry for display.
 type workspaceEntry struct {
-	Name   string
-	Branch string
-	Dir    string
-	Status string
-	Mode   string
-	IsMain bool
+	Name        string
+	Branch      string
+	Dir         string
+	Status      string
+	Mode        string
+	IsMain      bool
+	NeedsReview bool
 }
 
 // listWorkspaces lists all planq workspaces with styled cards.
@@ -150,7 +156,7 @@ func listWorkspaces() error {
 	fmt.Println()
 
 	// Render each workspace as a card
-	var activeCount, inactiveCount, orphanedCount int
+	var activeCount, inactiveCount, orphanedCount, reviewCount int
 	for _, entry := range entries {
 		card := renderWorkspaceCard(entry)
 		fmt.Println(card)
@@ -163,10 +169,13 @@ func listWorkspaces() error {
 		case "orphaned":
 			orphanedCount++
 		}
+		if entry.NeedsReview {
+			reviewCount++
+		}
 	}
 
 	// Render summary
-	summary := renderSummary(len(entries), activeCount, inactiveCount, orphanedCount)
+	summary := renderSummary(len(entries), activeCount, inactiveCount, orphanedCount, reviewCount)
 	fmt.Println(summary)
 
 	return nil
@@ -197,10 +206,13 @@ func renderWorkspaceCard(e workspaceEntry) string {
 		baseCardStyle = cardStyle
 	}
 
-	// Header line with name and optional [main] badge
+	// Header line with name and optional badges
 	headerLine := fmt.Sprintf("%s  %s", statusIcon, nameStyle.Render(e.Name))
 	if e.IsMain {
 		headerLine += "  " + mainBadgeStyle.Render("[main]")
+	}
+	if e.NeedsReview {
+		headerLine += "  " + reviewBadgeStyle.Render("[review]")
 	}
 
 	// Detail lines
@@ -217,7 +229,7 @@ func renderWorkspaceCard(e workspaceEntry) string {
 }
 
 // renderSummary creates the summary line.
-func renderSummary(total, active, inactive, orphaned int) string {
+func renderSummary(total, active, inactive, orphaned, review int) string {
 	word := "workspace"
 	if total != 1 {
 		word = "workspaces"
@@ -232,6 +244,9 @@ func renderSummary(total, active, inactive, orphaned int) string {
 	}
 	if orphaned > 0 {
 		details = append(details, statusOrphanedStyle.Render(fmt.Sprintf("%d orphaned", orphaned)))
+	}
+	if review > 0 {
+		details = append(details, reviewBadgeStyle.Render(fmt.Sprintf("%d needs review", review)))
 	}
 
 	summary := fmt.Sprintf("%d %s", total, word)
@@ -254,20 +269,25 @@ func buildWorkspaceEntries(worktrees map[string]stackit.WorktreeEntry, sessions 
 			status = "active"
 		}
 
-		// Get mode from workspace
+		// Get mode and review state from workspace
 		mode := "-"
+		needsReview := false
 		ws := &workspace.Workspace{Name: name, WorktreePath: wt.Path}
 		if m, err := ws.GetMode(); err == nil {
 			mode = string(m)
 		}
+		if rs, err := ws.GetReviewState(); err == nil {
+			needsReview = rs.NeedsReview
+		}
 
 		entries = append(entries, workspaceEntry{
-			Name:   name,
-			Branch: wt.Branch,
-			Dir:    filepath.Base(wt.Path),
-			Status: status,
-			Mode:   mode,
-			IsMain: mainWorkspaces[name],
+			Name:        name,
+			Branch:      wt.Branch,
+			Dir:         filepath.Base(wt.Path),
+			Status:      status,
+			Mode:        mode,
+			IsMain:      mainWorkspaces[name],
+			NeedsReview: needsReview,
 		})
 		seen[name] = true
 	}
