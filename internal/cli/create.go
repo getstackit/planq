@@ -132,6 +132,11 @@ func createWorkspace(name, scope, agentCmd string, detach bool) error {
 		fmt.Printf("  Warning: failed to bind mode toggle key: %v\n", err)
 	}
 
+	// Bind workspace navigation keybindings (Ctrl-B w, n, p)
+	if err := tm.BindWorkspaceNavigation(sessionName); err != nil {
+		fmt.Printf("  Warning: failed to bind workspace navigation keys: %v\n", err)
+	}
+
 	// Configure status bar with initial mode (plan)
 	if err := tm.ConfigureStatusBar(sessionName, name, "plan"); err != nil {
 		fmt.Printf("  Warning: failed to configure status bar: %v\n", err)

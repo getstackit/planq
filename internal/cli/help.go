@@ -30,12 +30,19 @@ func printTmuxHelp() {
 Planq tmux Quick Reference
 ==========================
 
-NAVIGATION
+WORKSPACE SWITCHING
+  Ctrl+B w          Open workspace selector (popup with fzf)
+  Ctrl+B s          Session switcher (tmux built-in tree view)
+  Ctrl+B n          Switch to next workspace
+  Ctrl+B p          Switch to previous workspace
+  planq list        Show all workspaces
+
+PANE NAVIGATION
   Ctrl+B ←/→/↑/↓    Move between panes
   Ctrl+B o          Cycle through panes
   Click             Select pane (mouse enabled)
 
-PLANQ SPECIFIC
+MODE SWITCHING
   Ctrl+B m          Toggle plan/execute mode
   planq mode        Show current mode
   planq mode plan   Switch to plan mode
