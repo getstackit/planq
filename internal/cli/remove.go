@@ -6,6 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"planq.dev/planq/internal/stackit"
+	"planq.dev/planq/internal/state"
 	"planq.dev/planq/internal/tmux"
 )
 
@@ -93,7 +94,22 @@ func removeWorkspace(name string) error {
 		}
 	}
 
-	// Remove worktree
+	// Check if this is a main workspace
+	globalState, err := state.Load()
+	if err != nil {
+		fmt.Printf("  Warning: Could not load global state: %v\n", err)
+	} else if repoPath, isMain := globalState.FindMainWorkspaceByName(name); isMain {
+		// This is a main workspace - remove state entry but preserve worktree
+		fmt.Println("  Removing main workspace registration...")
+		globalState.RemoveMainWorkspace(repoPath)
+		if err := globalState.Save(); err != nil {
+			fmt.Printf("  Warning: Could not save global state: %v\n", err)
+		}
+		fmt.Printf("Workspace %q removed (main worktree preserved)\n", name)
+		return nil
+	}
+
+	// Not a main workspace - remove worktree via stackit
 	fmt.Printf("  Removing worktree %q...\n", name)
 	st := stackit.NewClient()
 	if err := st.WorktreeRemove(name); err != nil {
