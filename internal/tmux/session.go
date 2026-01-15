@@ -91,10 +91,11 @@ func (m *Manager) CreateSession(name string, workdir string, layout Layout) (*go
 	// Allow mouse scroll to pass through to TUI apps (glow, vim, less, etc.)
 	// The smcup@:rmcup@ disables capture of alternate screen enter/exit sequences,
 	// letting applications handle their own scrolling instead of tmux entering copy-mode
-	// This is a server-level option (level "-s")
-	if err := m.tmux.SetOption("", "terminal-overrides", ",*:smcup@:rmcup@", "-s"); err != nil {
+	// This is a server-level option requiring -s flag, use exec.Command directly
+	termCmd := exec.Command("tmux", "set-option", "-s", "terminal-overrides", ",*:smcup@:rmcup@")
+	if output, err := termCmd.CombinedOutput(); err != nil {
 		// Non-fatal, scroll may not work in TUI apps
-		fmt.Printf("Warning: could not set terminal-overrides: %v\n", err)
+		fmt.Printf("Warning: could not set terminal-overrides: %v (output: %s)\n", err, string(output))
 	}
 
 	// Get the first window
