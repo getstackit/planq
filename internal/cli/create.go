@@ -208,11 +208,6 @@ func createWorkspace(name, scope, agentCmd string, detach, useMain bool) error {
 		}
 	}
 
-	// Show welcome banner in the terminal pane (pane 2)
-	if err := tm.ShowWelcomeBanner(sessionName, 2, name, workdir, ws.PlanFile()); err != nil {
-		fmt.Printf("  Warning: failed to show welcome banner: %v\n", err)
-	}
-
 	if detach {
 		fmt.Println()
 		fmt.Printf("To open: planq open %s\n", name)
