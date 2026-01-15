@@ -155,7 +155,7 @@ func createWorkspace(name, scope, agentCmd string, detach, useMain bool) error {
 		},
 	}
 
-	session, err := tm.CreateSession(sessionName, workdir, layout)
+	_, err = tm.CreateSession(sessionName, workdir, layout)
 	if err != nil {
 		// Cleanup on failure
 		if !isMainWorkspace {
@@ -209,13 +209,9 @@ func createWorkspace(name, scope, agentCmd string, detach, useMain bool) error {
 	}
 
 	// Show welcome banner in the terminal pane (pane 2)
-	if err := tm.ShowWelcomeBanner(sessionName, 2, name); err != nil {
+	if err := tm.ShowWelcomeBanner(sessionName, 2, name, workdir, ws.PlanFile()); err != nil {
 		fmt.Printf("  Warning: failed to show welcome banner: %v\n", err)
 	}
-
-	fmt.Printf("  Session created: %s\n", session.Name)
-	fmt.Println()
-	fmt.Printf("Workspace %q created successfully!\n", name)
 
 	if detach {
 		fmt.Println()
@@ -224,7 +220,5 @@ func createWorkspace(name, scope, agentCmd string, detach, useMain bool) error {
 	}
 
 	// Attach to the session
-	fmt.Println()
-	fmt.Println("Opening workspace...")
 	return tm.AttachSession(sessionName)
 }

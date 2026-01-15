@@ -657,19 +657,25 @@ func (m *Manager) GetPlanqSessionCount(currentSessionName string) (int, int, err
 }
 
 // ShowWelcomeBanner displays a welcome message with keybinding hints in a pane.
-func (m *Manager) ShowWelcomeBanner(sessionName string, paneIndex int, workspaceName string) error {
-	// Pad workspace name to fit in the banner (max 38 chars)
-	displayName := workspaceName
-	if len(displayName) > 38 {
-		displayName = displayName[:35] + "..."
-	}
-	// Pad to 38 chars
-	for len(displayName) < 38 {
-		displayName += " "
+func (m *Manager) ShowWelcomeBanner(sessionName string, paneIndex int, workspaceName, worktreePath, planFile string) error {
+	// Helper to pad or truncate a string to exactly n characters
+	padOrTrunc := func(s string, n int) string {
+		if len(s) > n {
+			return s[:n-3] + "..."
+		}
+		for len(s) < n {
+			s += " "
+		}
+		return s
 	}
 
+	// Format display strings (59 chars inner width, minus labels and padding)
+	displayName := padOrTrunc(workspaceName, 28)
+	displayPath := padOrTrunc(worktreePath, 48)
+	displayPlan := padOrTrunc(planFile, 48)
+
 	// Build the welcome banner as a single printf command
-	banner := fmt.Sprintf(`printf '\n╭───────────────────────────────────────────────────────────╮\n│  Planq Workspace: %s  │\n├───────────────────────────────────────────────────────────┤\n│  Essential keybindings (Prefix = Ctrl+B):                 │\n│                                                           │\n│  Ctrl+B m       Toggle plan/execute mode                  │\n│  Ctrl+B w       Switch workspace (popup selector)         │\n│  Ctrl+B s       Session switcher (tmux built-in)          │\n│  Ctrl+B n/p     Next/previous workspace                   │\n│  Ctrl+B ←/→     Move between panes                        │\n│  Ctrl+B d       Detach (exit without closing)             │\n│  Ctrl+B ?       Show all tmux keybindings                 │\n│                                                           │\n│  Mouse is enabled - click panes to focus, drag to resize  │\n│                                                           │\n│  Run \"planq help tmux\" for more commands                  │\n╰───────────────────────────────────────────────────────────╯\n\n'`, displayName)
+	banner := fmt.Sprintf(`printf '\n╭───────────────────────────────────────────────────────────╮\n│  Planq Workspace: %s  Ready ✓  │\n├───────────────────────────────────────────────────────────┤\n│  Path: %s  │\n│  Plan: %s  │\n├───────────────────────────────────────────────────────────┤\n│  Keybindings (Ctrl+B prefix):                             │\n│                                                           │\n│  Ctrl+B m       Toggle plan/execute mode                  │\n│  Ctrl+B w       Switch workspace (popup selector)         │\n│  Ctrl+B s       Session switcher (tmux built-in)          │\n│  Ctrl+B n/p     Next/previous workspace                   │\n│  Ctrl+B ←/→     Move between panes                        │\n│  Ctrl+B d       Detach (exit without closing)             │\n│  Ctrl+B ?       Show all tmux keybindings                 │\n│                                                           │\n│  Mouse is enabled - click panes to focus, drag to resize  │\n│                                                           │\n│  Run \"planq help tmux\" for more commands                  │\n╰───────────────────────────────────────────────────────────╯\n\n'`, displayName, displayPath, displayPlan)
 
 	// Send the banner command to the pane
 	target := fmt.Sprintf("%s:%d.%d", sessionName, 0, paneIndex)
