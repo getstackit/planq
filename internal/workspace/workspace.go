@@ -1,10 +1,12 @@
 package workspace
 
 import (
+	"bytes"
 	_ "embed"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 //go:embed templates/planq-mode.md
@@ -15,6 +17,8 @@ const (
 	PlanqDirName = ".planq"
 	// ClaudeDirName is the name of the Claude configuration directory.
 	ClaudeDirName = ".claude"
+	// AgentSubdirName is the name of the agent state subdirectory within .planq.
+	AgentSubdirName = "agent"
 )
 
 // Workspace represents a planq workspace with its configuration.
@@ -114,4 +118,80 @@ func (w *Workspace) executeAgentCommand() string {
 		planFile,
 	)
 	return fmt.Sprintf("claude --append-system-prompt %q", systemPrompt)
+}
+
+// AgentDir returns the path to the .planq/agent directory.
+func (w *Workspace) AgentDir() string {
+	return filepath.Join(w.PlanqDir(), AgentSubdirName)
+}
+
+// InitAgentDir creates the .agent directory structure with initial files.
+func (w *Workspace) InitAgentDir() error {
+	agentDir := w.AgentDir()
+
+	if err := os.MkdirAll(agentDir, 0755); err != nil {
+		return fmt.Errorf("failed to create agent directory %s: %w", agentDir, err)
+	}
+
+	// Create initial scratch.md
+	scratchFile := filepath.Join(agentDir, "scratch.md")
+	scratchContent := []byte("# Scratch\n\nWorking notes for this session.\n")
+	if err := os.WriteFile(scratchFile, scratchContent, 0644); err != nil {
+		return fmt.Errorf("failed to create scratch file: %w", err)
+	}
+
+	// Add .planq/agent to .gitignore
+	if err := w.ensureGitignore(".planq/agent/"); err != nil {
+		return fmt.Errorf("failed to update .gitignore: %w", err)
+	}
+
+	return nil
+}
+
+// CleanupAgentDir removes the .agent directory.
+func (w *Workspace) CleanupAgentDir() error {
+	agentDir := w.AgentDir()
+
+	if _, err := os.Stat(agentDir); os.IsNotExist(err) {
+		return nil // Nothing to clean up
+	}
+
+	if err := os.RemoveAll(agentDir); err != nil {
+		return fmt.Errorf("failed to remove agent directory: %w", err)
+	}
+
+	return nil
+}
+
+// ensureGitignore adds an entry to .gitignore if not present.
+func (w *Workspace) ensureGitignore(entry string) error {
+	gitignorePath := filepath.Join(w.WorktreePath, ".gitignore")
+
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("failed to read .gitignore: %w", err)
+	}
+
+	// Check if entry already exists
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		if strings.TrimSpace(line) == entry {
+			return nil // Already present
+		}
+	}
+
+	// Append entry
+	var newContent []byte
+	if len(content) > 0 && !bytes.HasSuffix(content, []byte("\n")) {
+		newContent = append(content, '\n')
+	} else {
+		newContent = content
+	}
+	newContent = append(newContent, []byte(entry+"\n")...)
+
+	if err := os.WriteFile(gitignorePath, newContent, 0644); err != nil {
+		return fmt.Errorf("failed to write .gitignore: %w", err)
+	}
+
+	return nil
 }

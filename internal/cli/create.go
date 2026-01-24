@@ -137,6 +137,21 @@ func createWorkspace(name, scope, agentCmd string, detach, useMain bool) error {
 	}
 	fmt.Printf("  Plan file will be at: %s\n", ws.PlanFile())
 
+	fmt.Printf("  Initializing .agent directory...\n")
+	if err := ws.InitAgentDir(); err != nil {
+		// Cleanup on failure
+		if !isMainWorkspace {
+			_ = st.WorktreeRemove(name)
+		} else {
+			// Remove state entry for main workspace
+			if globalState, err := state.Load(); err == nil {
+				globalState.RemoveMainWorkspace(workdir)
+				_ = globalState.Save()
+			}
+		}
+		return fmt.Errorf("failed to initialize .agent directory: %w", err)
+	}
+
 	// Determine agent command (use workspace default unless overridden)
 	finalAgentCmd := ws.AgentCommand()
 	if agentCmd != "" {

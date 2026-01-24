@@ -8,6 +8,7 @@ import (
 	"planq.dev/planq/internal/stackit"
 	"planq.dev/planq/internal/state"
 	"planq.dev/planq/internal/tmux"
+	"planq.dev/planq/internal/workspace"
 )
 
 var removeAll bool
@@ -99,7 +100,11 @@ func removeWorkspace(name string) error {
 	if err != nil {
 		fmt.Printf("  Warning: Could not load global state: %v\n", err)
 	} else if repoPath, isMain := globalState.FindMainWorkspaceByName(name); isMain {
-		// This is a main workspace - remove state entry but preserve worktree
+		// This is a main workspace - clean up .agent and remove state entry, but preserve worktree
+		ws := &workspace.Workspace{Name: name, WorktreePath: repoPath}
+		if err := ws.CleanupAgentDir(); err != nil {
+			fmt.Printf("  Warning: Could not clean up .agent directory: %v\n", err)
+		}
 		fmt.Println("  Removing main workspace registration...")
 		globalState.RemoveMainWorkspace(repoPath)
 		if err := globalState.Save(); err != nil {
