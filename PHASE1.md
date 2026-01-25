@@ -293,7 +293,7 @@ func TestEnsureGitignore(t *testing.T) {
 
 ```bash
 # 1. Build
-just build
+mise run build
 
 # 2. Create a workspace
 planq create test-phase0
@@ -343,7 +343,7 @@ After implementing and testing:
 
 ## Definition of Done
 
-- [ ] `just check` passes (fmt, lint, tests)
+- [ ] `mise run check` passes (fmt, lint, tests)
 - [ ] Unit tests for InitAgentDir, CleanupAgentDir, ensureGitignore
 - [ ] Manual verification complete
 - [ ] Evaluation questions answered

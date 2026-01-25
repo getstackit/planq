@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,9 +28,12 @@ func TestInitAgentDir(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	// InitAgentDir requires .planq/ to exist (created by InitPlanqDir in normal flow)
+	// InitAgentDir requires .planq/ and .claude/ to exist (created by InitPlanqDir in normal flow)
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".planq"), 0755); err != nil {
 		t.Fatalf("Failed to create .planq: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".claude"), 0755); err != nil {
+		t.Fatalf("Failed to create .claude: %v", err)
 	}
 
 	if err := ws.InitAgentDir(); err != nil {
@@ -40,6 +44,12 @@ func TestInitAgentDir(t *testing.T) {
 	agentDir := filepath.Join(tmpDir, ".planq", "agent")
 	if _, err := os.Stat(agentDir); os.IsNotExist(err) {
 		t.Error(".planq/agent directory not created")
+	}
+
+	// Verify .planq/agent/plans/ exists
+	plansDir := filepath.Join(agentDir, "plans")
+	if _, err := os.Stat(plansDir); os.IsNotExist(err) {
+		t.Error(".planq/agent/plans directory not created")
 	}
 
 	// Verify scratch.md exists and has content
@@ -61,6 +71,20 @@ func TestInitAgentDir(t *testing.T) {
 	if !strings.Contains(string(content), ".planq/agent/") {
 		t.Error(".gitignore missing .planq/agent/ entry")
 	}
+
+	// Verify .claude/settings.json created with plansDirectory
+	settingsFile := filepath.Join(tmpDir, ".claude", "settings.json")
+	content, err = os.ReadFile(settingsFile)
+	if err != nil {
+		t.Fatalf("Failed to read .claude/settings.json: %v", err)
+	}
+	var settings map[string]interface{}
+	if err := json.Unmarshal(content, &settings); err != nil {
+		t.Fatalf("Failed to parse settings.json: %v", err)
+	}
+	if settings["plansDirectory"] != ".planq/agent/plans" {
+		t.Errorf("plansDirectory = %q, want %q", settings["plansDirectory"], ".planq/agent/plans")
+	}
 }
 
 func TestInitAgentDir_Idempotent(t *testing.T) {
@@ -71,9 +95,12 @@ func TestInitAgentDir_Idempotent(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	// InitAgentDir requires .planq/ to exist
+	// InitAgentDir requires .planq/ and .claude/ to exist
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".planq"), 0755); err != nil {
 		t.Fatalf("Failed to create .planq: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".claude"), 0755); err != nil {
+		t.Fatalf("Failed to create .claude: %v", err)
 	}
 
 	// Call twice - should not fail
@@ -104,9 +131,12 @@ func TestCleanupAgentDir(t *testing.T) {
 		WorktreePath: tmpDir,
 	}
 
-	// InitAgentDir requires .planq/ to exist
+	// InitAgentDir requires .planq/ and .claude/ to exist
 	if err := os.MkdirAll(filepath.Join(tmpDir, ".planq"), 0755); err != nil {
 		t.Fatalf("Failed to create .planq: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".claude"), 0755); err != nil {
+		t.Fatalf("Failed to create .claude: %v", err)
 	}
 
 	// Initialize first
@@ -142,6 +172,92 @@ func TestCleanupAgentDir_NotExists(t *testing.T) {
 	// Cleanup without init - should not fail
 	if err := ws.CleanupAgentDir(); err != nil {
 		t.Fatalf("CleanupAgentDir() failed on non-existent dir: %v", err)
+	}
+}
+
+func TestConfigureClaudeSettings(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	ws := &Workspace{
+		Name:         "test-workspace",
+		WorktreePath: tmpDir,
+	}
+
+	// Create .claude directory
+	if err := os.MkdirAll(filepath.Join(tmpDir, ".claude"), 0755); err != nil {
+		t.Fatalf("Failed to create .claude: %v", err)
+	}
+
+	if err := ws.ConfigureClaudeSettings(); err != nil {
+		t.Fatalf("ConfigureClaudeSettings() failed: %v", err)
+	}
+
+	// Verify settings file created
+	settingsFile := filepath.Join(tmpDir, ".claude", "settings.json")
+	content, err := os.ReadFile(settingsFile)
+	if err != nil {
+		t.Fatalf("Failed to read settings.json: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(content, &settings); err != nil {
+		t.Fatalf("Failed to parse settings.json: %v", err)
+	}
+
+	if settings["plansDirectory"] != ".planq/agent/plans" {
+		t.Errorf("plansDirectory = %q, want %q", settings["plansDirectory"], ".planq/agent/plans")
+	}
+}
+
+func TestConfigureClaudeSettings_PreservesExisting(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	ws := &Workspace{
+		Name:         "test-workspace",
+		WorktreePath: tmpDir,
+	}
+
+	// Create .claude directory with existing settings
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("Failed to create .claude: %v", err)
+	}
+
+	// Write existing settings with other fields (simulating stackit hook copy)
+	existingSettings := `{"apiKey": "secret", "model": "claude-3", "someOtherSetting": "value"}`
+	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(existingSettings), 0644); err != nil {
+		t.Fatalf("Failed to write existing settings: %v", err)
+	}
+
+	if err := ws.ConfigureClaudeSettings(); err != nil {
+		t.Fatalf("ConfigureClaudeSettings() failed: %v", err)
+	}
+
+	// Verify settings
+	content, err := os.ReadFile(filepath.Join(claudeDir, "settings.json"))
+	if err != nil {
+		t.Fatalf("Failed to read settings.json: %v", err)
+	}
+
+	var settings map[string]any
+	if err := json.Unmarshal(content, &settings); err != nil {
+		t.Fatalf("Failed to parse settings.json: %v", err)
+	}
+
+	// Verify plansDirectory is set
+	if settings["plansDirectory"] != ".planq/agent/plans" {
+		t.Errorf("plansDirectory = %q, want %q", settings["plansDirectory"], ".planq/agent/plans")
+	}
+
+	// Verify existing settings are preserved
+	if settings["apiKey"] != "secret" {
+		t.Errorf("apiKey was not preserved, got %v", settings["apiKey"])
+	}
+	if settings["model"] != "claude-3" {
+		t.Errorf("model was not preserved, got %v", settings["model"])
+	}
+	if settings["someOtherSetting"] != "value" {
+		t.Errorf("someOtherSetting was not preserved, got %v", settings["someOtherSetting"])
 	}
 }
 

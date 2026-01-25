@@ -3,6 +3,7 @@ package workspace
 import (
 	"bytes"
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -125,12 +126,19 @@ func (w *Workspace) AgentDir() string {
 	return filepath.Join(w.PlanqDir(), AgentSubdirName)
 }
 
-// InitAgentDir creates the .agent directory structure with initial files.
+// InitAgentDir creates the .planq/agent directory structure with initial files.
 func (w *Workspace) InitAgentDir() error {
 	agentDir := w.AgentDir()
 
-	if err := os.MkdirAll(agentDir, 0755); err != nil {
-		return fmt.Errorf("failed to create agent directory %s: %w", agentDir, err)
+	// Create agent directory and plans subdirectory
+	dirs := []string{
+		agentDir,
+		w.AgentPlansDir(),
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
 	}
 
 	// Create initial scratch.md
@@ -145,10 +153,15 @@ func (w *Workspace) InitAgentDir() error {
 		return fmt.Errorf("failed to update .gitignore: %w", err)
 	}
 
+	// Configure Claude to use agent plans directory
+	if err := w.ConfigureClaudeSettings(); err != nil {
+		return fmt.Errorf("failed to configure Claude settings: %w", err)
+	}
+
 	return nil
 }
 
-// CleanupAgentDir removes the .agent directory.
+// CleanupAgentDir removes the .planq/agent directory.
 func (w *Workspace) CleanupAgentDir() error {
 	agentDir := w.AgentDir()
 
@@ -158,6 +171,46 @@ func (w *Workspace) CleanupAgentDir() error {
 
 	if err := os.RemoveAll(agentDir); err != nil {
 		return fmt.Errorf("failed to remove agent directory: %w", err)
+	}
+
+	return nil
+}
+
+// AgentPlansDir returns the path to the .planq/agent/plans directory.
+func (w *Workspace) AgentPlansDir() string {
+	return filepath.Join(w.AgentDir(), "plans")
+}
+
+// ClaudeSettingsFile returns the path to the .claude/settings.json file.
+func (w *Workspace) ClaudeSettingsFile() string {
+	return filepath.Join(w.WorktreePath, ClaudeDirName, "settings.json")
+}
+
+// ConfigureClaudeSettings creates or updates .claude/settings.json with planq-specific settings.
+// It merges with existing settings to preserve any configuration copied from the main repo
+// (e.g., by stackit hooks).
+func (w *Workspace) ConfigureClaudeSettings() error {
+	settingsFile := w.ClaudeSettingsFile()
+
+	// Read existing settings if present, using map to preserve unknown fields
+	settings := make(map[string]any)
+	if data, err := os.ReadFile(settingsFile); err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			return fmt.Errorf("failed to parse existing settings: %w", err)
+		}
+	}
+
+	// Merge in plansDirectory (overwrites if already set)
+	settings["plansDirectory"] = ".planq/agent/plans"
+
+	// Write settings
+	data, err := json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+
+	if err := os.WriteFile(settingsFile, data, 0644); err != nil {
+		return fmt.Errorf("failed to write settings file: %w", err)
 	}
 
 	return nil

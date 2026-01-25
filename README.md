@@ -78,7 +78,7 @@ planq/
 │   ├── git/                # Git utilities
 │   └── deps/               # Dependency validation
 ├── go.mod
-└── justfile
+└── mise.toml
 ```
 
 ### Key Abstractions
@@ -120,14 +120,18 @@ go install planq.dev/planq/cmd/planq@latest
 ## Development
 
 ```bash
+# Install mise and project tools
+brew install mise  # or: curl https://mise.run | sh
+mise install
+
 # Build
-just build
+mise run build
 
 # Run tests
-just test
+mise run test
 
 # Run all checks (fmt, lint, test)
-just check
+mise run check
 ```
 
 ## License

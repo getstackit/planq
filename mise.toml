@@ -1,0 +1,134 @@
+[settings]
+experimental = true
+
+[env]
+PLANQ_NO_LOGGING = "1"  # Used for tests
+GOBIN = "{{ config_root }}/bin"
+PROJECT_ROOT = "{{ config_root }}"
+_.path = ["{{ config_root }}/bin", "{{ env.HOME }}/go/bin"]
+
+[tools]
+# Go toolchain
+go = "1.25.5"
+
+# Test runner with prettier output
+"go:gotest.tools/gotestsum" = "latest"
+
+# Code formatting
+"go:golang.org/x/tools/cmd/goimports" = "latest"
+
+# Linting
+golangci-lint = "latest"
+
+# CLI utilities (recommended in AGENTS.md)
+"aqua:BurntSushi/ripgrep" = "latest"  # Fast text search (rg)
+"aqua:sharkdp/fd" = "latest"          # Fast file search
+"aqua:ast-grep/ast-grep" = "latest"   # AST-based code search
+"aqua:jqlang/jq" = "latest"           # JSON processing
+"aqua:mikefarah/yq" = "latest"        # YAML processing
+"cargo:tokei" = "latest"              # Code statistics
+
+[tasks.deps]
+description = "Download dependencies for all modules"
+run = """
+  go mod download
+  go mod tidy
+"""
+
+[tasks.build]
+description = "Build the planq binary with local version info"
+run = """
+  mkdir -p bin
+  COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  go build -ldflags "-X main.version=dev-local -X main.commit=$COMMIT -X main.date=$DATE" -o bin/planq ./cmd/planq
+"""
+
+[tasks.fmt]
+description = "Format code"
+run = "goimports -w ."
+
+[tasks.lint]
+description = "Run linter"
+run = "golangci-lint run --allow-parallel-runners"
+
+[tasks."lint-fix"]
+description = "Run linter and fix issues"
+run = "golangci-lint run --allow-parallel-runners --fix"
+
+[tasks.test]
+description = "Run all tests (with caching for faster repeated runs)"
+run = "gotestsum --format pkgname-and-test-fails -- ./..."
+
+[tasks."test-fresh"]
+description = "Run all tests without caching"
+run = "gotestsum --format pkgname-and-test-fails -- ./... -count=1"
+
+[tasks."test-verbose"]
+description = "Run tests with verbose output"
+run = "gotestsum --format standard-verbose -- ./..."
+
+[tasks."test-coverage"]
+description = "Run tests with coverage"
+run = """
+  gotestsum --format pkgname-and-test-fails -- -coverprofile=coverage.out ./...
+  go tool cover -html=coverage.out -o coverage.html
+"""
+
+[tasks."test-race"]
+description = "Run tests with race detection"
+run = "gotestsum --format pkgname-and-test-fails -- -race ./..."
+
+[tasks."test-pkg"]
+description = "Run tests for a specific package"
+usage = '''
+arg "package" help="Package to test (e.g. ./internal/tmux)"
+'''
+run = "gotestsum --format standard-verbose -- {{arg(name='package')}}"
+
+[tasks.clean]
+description = "Clean built binaries and test artifacts"
+run = """
+  rm -f coverage.out coverage.html
+  rm -rf bin/
+  rm -f ./planq
+  echo "Cleaned: binaries (bin/), shims (./planq), and test artifacts"
+"""
+
+[tasks.check]
+description = "Run all checks (format, lint, tests)"
+depends = ["fmt", "lint", "test"]
+
+[tasks."install-shims"]
+description = "Install shims to repo root for local development"
+depends = ["build"]
+run = """
+  cp scripts/planq-shim.sh ./planq
+  chmod +x ./planq
+  echo "Dev shim installed to repo root"
+"""
+
+[tasks.install]
+description = "Install binary to ~/.local/bin"
+run = """
+  mkdir -p ~/.local/bin
+  COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+  DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  go build -ldflags "-X main.version=dev-installed -X main.commit=$COMMIT -X main.date=$DATE" -o ~/.local/bin/planq ./cmd/planq
+  echo "Installed to ~/.local/bin"
+"""
+
+[tasks.uninstall]
+description = "Remove installed binary from ~/.local/bin"
+run = """
+  rm -f ~/.local/bin/planq
+  echo "Removed from ~/.local/bin"
+"""
+
+[tasks.run]
+description = "Build and run planq with arguments"
+depends = ["build"]
+usage = '''
+arg "args" var=true help="Arguments to pass to planq"
+'''
+run = "./bin/planq {{arg(name='args')}}"

@@ -2,7 +2,7 @@
 
 Go CLI for orchestrating parallel AI agent workspaces using git worktrees and tmux.
 
-**Tech stack:** Go 1.25, Cobra, gotmux
+**Tech stack:** Go 1.25, Cobra, gotmux, mise
 
 ## Architecture
 
@@ -19,19 +19,40 @@ Use these tools instead of standard alternatives:
 
 | Tool | Use Instead Of | Purpose |
 |------|----------------|---------|
-| `rg` (ripgrep) | `grep` | Fast text search |
-| `fd` | `find` | Fast file search |
+| `rg` (ripgrep) | `grep` | Fast text search, respects .gitignore |
+| `fd` | `find` | Fast file search, intuitive syntax |
+| `ast-grep` | `sed` for code | AST-based code search and refactoring |
 | `jq` | - | JSON processing |
+| `yq` | - | YAML processing |
+| `tokei` | `wc -l` | Code statistics and language breakdown |
+
+**Examples:**
+```bash
+rg "func.*Create" --type go          # Search for Create functions in Go files
+fd "\.go$" internal/                  # Find all Go files in internal/
+ast-grep -p 'fmt.Errorf($$$)' .       # Find all fmt.Errorf calls
+tokei                                 # Get codebase statistics
+jq '.dependencies' package.json       # Parse JSON
+```
 
 ## Requirements
 
 **All changes must pass tests and lint before committing:**
 
 ```bash
-just check             # Runs fmt, lint, and tests
-just test              # Run tests
-just lint              # Run linter
-just build             # Build binary
+mise run check         # Runs fmt, lint, and tests
+mise run test          # Run all tests
+mise run lint          # Run linter
+mise run build         # Build binary
+```
+
+**Workflow:** Run `mise run check` during development for quick feedback.
+
+## Build
+
+```bash
+mise run build   # Builds ./bin/planq binary
+mise run deps    # Install dependencies
 ```
 
 ## Commit Messages

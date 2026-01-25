@@ -546,7 +546,7 @@ Context is automatically surfaced at session start.
 Help agents know what's worth capturing:
 
 **Good learnings:**
-- "Always run `just check` before committing - pre-commit hooks catch issues"
+- "Always run `mise run check` before committing - pre-commit hooks catch issues"
 - "The `workspace.go` file is the central abstraction - start there when debugging"
 - "JWT tokens need both expiry AND signature validation - learned from auth bug"
 

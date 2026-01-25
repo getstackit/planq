@@ -10,7 +10,7 @@ Thank you for your interest in contributing to Planq! This document outlines the
 - **Git 2.25+**
 - **GitHub CLI (`gh`)** for PR operations
 - **tmux** for workspace management
-- **[just](https://github.com/casey/just)** (optional, but recommended for running development commands)
+- **[mise](https://mise.jdx.dev/)** for tool version management and task running
 - **stackit** for managing stacked changes
 
 ### Setting Up Your Development Environment
@@ -21,14 +21,15 @@ Thank you for your interest in contributing to Planq! This document outlines the
    cd planq
    ```
 
-2. Install dependencies:
+2. Install mise and project tools:
    ```bash
-   go mod download
+   brew install mise  # or: curl https://mise.run | sh
+   mise install
    ```
 
 3. Build the project:
    ```bash
-   just build
+   mise run build
    ```
 
 ## Development Workflow
@@ -70,12 +71,12 @@ Before submitting your changes, ensure all tests pass and the code is properly f
 
 ```bash
 # Run all checks (format, lint, test)
-just check
+mise run check
 
 # Or run individually:
-just fmt      # Format code
-just lint     # Run linter
-just test     # Run tests
+mise run fmt      # Format code
+mise run lint     # Run linter
+mise run test     # Run tests
 ```
 
 All changes must pass tests and linting before being submitted.
@@ -124,7 +125,7 @@ chore: update dependencies
 
 1. Ensure your code passes all checks:
    ```bash
-   just check
+   mise run check
    ```
 
 2. Submit your stack to GitHub:
@@ -138,7 +139,7 @@ chore: update dependencies
 
 ## Code Style
 
-- Follow Go standard formatting (use `just fmt` or `goimports`)
+- Follow Go standard formatting (use `mise run fmt` or `goimports`)
 - Follow the existing code style in the repository
 - Write clear, self-documenting code
 - Add comments for complex logic
