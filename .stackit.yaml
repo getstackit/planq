@@ -1,0 +1,3 @@
+hooks:
+  post-worktree-create:
+    - mise trust
