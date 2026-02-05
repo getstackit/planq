@@ -33,4 +33,6 @@ func init() {
 	rootCmd.AddCommand(cleanCmd)
 	rootCmd.AddCommand(helpCmd)
 	rootCmd.AddCommand(notifyCmd)
+	rootCmd.AddCommand(queueCmd)
+	rootCmd.AddCommand(mcpCmd)
 }
