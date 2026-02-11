@@ -48,3 +48,41 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+// Item represents a queued work item.
+type Item struct {
+	Filename string
+	Content  string
+}
+
+// List returns all queued items, sorted by filename (oldest first).
+func List(projectRoot string) ([]Item, error) {
+	queueDir := Dir(projectRoot)
+
+	entries, err := os.ReadDir(queueDir)
+	if os.IsNotExist(err) {
+		return nil, nil // No queue directory = no items
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to read queue directory: %w", err)
+	}
+
+	var items []Item
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+
+		content, err := os.ReadFile(filepath.Join(queueDir, entry.Name()))
+		if err != nil {
+			continue // Skip unreadable files
+		}
+
+		items = append(items, Item{
+			Filename: entry.Name(),
+			Content:  strings.TrimSpace(string(content)),
+		})
+	}
+
+	return items, nil
+}

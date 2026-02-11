@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss/v2"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/spf13/cobra"
 	"planq.dev/planq/internal/stackit"
 	"planq.dev/planq/internal/state"

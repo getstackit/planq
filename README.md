@@ -117,6 +117,86 @@ go install planq.dev/planq/cmd/planq@latest
 - Claude Code CLI (or other agent)
 - glow (optional, for plan viewing)
 
+## MCP Server
+
+Planq includes an MCP (Model Context Protocol) server that exposes tools to Claude Code. This enables Claude to queue work items (plans, bugs, ideas) directly through the MCP protocol.
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `planq_queue` | Save work for later. Queue a plan, bug, or idea to revisit. |
+| `planq_list` | List all queued items, sorted oldest first. |
+
+### Setup
+
+**Option 1: Project-level configuration (recommended)**
+
+Create a `.mcp.json` file in your project root:
+
+```json
+{
+  "mcpServers": {
+    "planq": {
+      "type": "stdio",
+      "command": "/path/to/planq",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+If running from a non-git directory or a parent monorepo, set `PLANQ_PROJECT_ROOT`:
+
+```json
+{
+  "mcpServers": {
+    "planq": {
+      "type": "stdio",
+      "command": "/path/to/planq",
+      "args": ["mcp"],
+      "env": {
+        "PLANQ_PROJECT_ROOT": "/path/to/your/project"
+      }
+    }
+  }
+}
+```
+
+**Option 2: Using Claude CLI**
+
+```bash
+# Add to current project (stored in ~/.claude.json)
+claude mcp add --transport stdio planq -- planq mcp
+
+# Add globally (available in all projects)
+claude mcp add --transport stdio planq --scope user -- planq mcp
+
+# Add to project (creates .mcp.json, can be checked into git)
+claude mcp add --transport stdio planq --scope project -- planq mcp
+```
+
+### Verify Setup
+
+```bash
+# List configured MCP servers
+claude mcp list
+
+# Check status in Claude Code
+/mcp
+```
+
+### Development
+
+To dogfood the MCP server locally:
+
+```bash
+# Build the binary
+mise run build
+
+# The .mcp.json is pre-configured to use ./bin/planq
+```
+
 ## Development
 
 ```bash

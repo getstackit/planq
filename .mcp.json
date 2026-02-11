@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "planq": {
+      "type": "stdio",
+      "command": "./bin/planq",
+      "args": ["mcp"]
+    }
+  }
+}
