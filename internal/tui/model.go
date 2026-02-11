@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"os/exec"
+	"sync"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -25,18 +26,21 @@ func Run(cmd0, cmd1 *exec.Cmd) error {
 	m := &model{cmd0: cmd0, cmd1: cmd1}
 	p := tea.NewProgram(m)
 	_, err := p.Run()
+	// Ensure cleanup even if bubbletea exits without going through Update.
+	m.cleanup()
 	return err
 }
 
 // model is the bubbletea model for the dual-pane terminal TUI.
 type model struct {
-	cmd0, cmd1 *exec.Cmd
-	panes      [2]*Pane
-	focused    int
-	metaActive bool
-	width      int
-	height     int
-	started    bool
+	cmd0, cmd1  *exec.Cmd
+	panes       [2]*Pane
+	focused     int
+	metaActive  bool
+	width       int
+	height      int
+	started     bool
+	cleanupOnce sync.Once
 }
 
 // Init returns the initial command.
@@ -48,46 +52,15 @@ func (m *model) Init() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-
-		if !m.started {
-			pw, ph := paneSize(m.width, m.height)
-			if pw > 0 && ph > 0 {
-				p0, err := NewPane(pw, ph, m.cmd0)
-				if err != nil {
-					return m, tea.Quit
-				}
-				p1, err := NewPane(pw, ph, m.cmd1)
-				if err != nil {
-					p0.Close()
-					return m, tea.Quit
-				}
-				m.panes[0] = p0
-				m.panes[1] = p1
-				m.started = true
-			}
-		} else {
-			pw, ph := paneSize(m.width, m.height)
-			if pw > 0 && ph > 0 {
-				for _, p := range m.panes {
-					if p != nil {
-						p.Resize(pw, ph) //nolint:errcheck
-					}
-				}
-			}
-		}
-		return m, nil
+		return m.handleResize(msg)
 
 	case tea.KeyPressMsg:
 		return m.handleKey(msg)
 
 	case tickMsg:
-		if m.started && m.panes[0] != nil && m.panes[1] != nil {
-			if m.panes[0].Exited() && m.panes[1].Exited() {
-				m.cleanup()
-				return m, tea.Quit
-			}
+		if m.started && m.panes[0].Exited() && m.panes[1].Exited() {
+			m.cleanup()
+			return m, tea.Quit
 		}
 		return m, doTick()
 	}
@@ -95,8 +68,44 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// handleResize creates panes on first resize or resizes existing ones.
+func (m *model) handleResize(msg tea.WindowSizeMsg) (tea.Model, tea.Cmd) {
+	m.width = msg.Width
+	m.height = msg.Height
+
+	pw, ph := paneSize(m.width, m.height)
+	if pw <= 0 || ph <= 0 {
+		return m, nil
+	}
+
+	if !m.started {
+		p0, err := NewPane(pw, ph, m.cmd0)
+		if err != nil {
+			return m, tea.Quit
+		}
+		p1, err := NewPane(pw, ph, m.cmd1)
+		if err != nil {
+			p0.Close()
+			return m, tea.Quit
+		}
+		m.panes[0] = p0
+		m.panes[1] = p1
+		m.started = true
+		return m, nil
+	}
+
+	for _, p := range m.panes {
+		p.Resize(pw, ph) //nolint:errcheck
+	}
+	return m, nil
+}
+
 // handleKey processes key events with Ctrl+A meta prefix support.
 func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if !m.started {
+		return m, nil
+	}
+
 	key := tea.Key(msg)
 
 	if m.metaActive {
@@ -109,12 +118,7 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case key.Code == 'a' && key.Mod == tea.ModCtrl:
 			// Ctrl+A Ctrl+A → send literal Ctrl+A to focused pane
-			if m.started && m.panes[m.focused] != nil {
-				m.panes[m.focused].Emulator().SendKey(vt.KeyPressEvent{
-					Code: 'a',
-					Mod:  vt.ModCtrl,
-				})
-			}
+			m.sendKey(vt.KeyPressEvent{Code: 'a', Mod: vt.ModCtrl})
 		}
 		return m, nil
 	}
@@ -126,20 +130,27 @@ func (m *model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	// Forward key to focused pane
-	if m.started && m.panes[m.focused] != nil {
-		m.panes[m.focused].Emulator().SendKey(vt.KeyPressEvent(msg))
-	}
-
+	m.sendKey(vt.KeyPressEvent(msg))
 	return m, nil
 }
 
-// cleanup closes both panes.
-func (m *model) cleanup() {
-	for _, p := range m.panes {
-		if p != nil {
-			p.Close()
-		}
+// sendKey forwards a key event to the focused pane if it's still running.
+func (m *model) sendKey(key vt.KeyPressEvent) {
+	p := m.panes[m.focused]
+	if !p.Exited() {
+		p.Emulator().SendKey(key)
 	}
+}
+
+// cleanup closes both panes. Safe to call multiple times.
+func (m *model) cleanup() {
+	m.cleanupOnce.Do(func() {
+		for _, p := range m.panes {
+			if p != nil {
+				p.Close()
+			}
+		}
+	})
 }
 
 // View returns the tea.View with a composite layer that draws both panes.
@@ -147,7 +158,7 @@ func (m *model) View() tea.View {
 	var v tea.View
 	v.AltScreen = true
 
-	if !m.started || m.panes[0] == nil || m.panes[1] == nil {
+	if !m.started {
 		v.SetContent("Waiting for terminal size...")
 		return v
 	}
@@ -228,19 +239,19 @@ func (d *dualPaneLayer) Draw(s tea.Screen, r tea.Rectangle) {
 
 	// Top border row
 	setCell(s, ox+lBorderL, oy, "╭", lBorder)
-	for i := 0; i < pw; i++ {
+	for i := range pw {
 		setCell(s, ox+lContent+i, oy, "─", lBorder)
 	}
 	setCell(s, ox+lBorderR, oy, "╮", lBorder)
 	setCell(s, ox+divCol, oy, "│", divStyle)
 	setCell(s, ox+rBorderL, oy, "╭", rBorder)
-	for i := 0; i < pw; i++ {
+	for i := range pw {
 		setCell(s, ox+rContent+i, oy, "─", rBorder)
 	}
 	setCell(s, ox+rBorderR, oy, "╮", rBorder)
 
 	// Content rows — draw borders, then let emulator.Draw fill content
-	for row := 0; row < ph; row++ {
+	for row := range ph {
 		y := oy + 1 + row
 		setCell(s, ox+lBorderL, y, "│", lBorder)
 		setCell(s, ox+lBorderR, y, "│", lBorder)
@@ -258,13 +269,13 @@ func (d *dualPaneLayer) Draw(s tea.Screen, r tea.Rectangle) {
 	// Bottom border row
 	botY := oy + 1 + ph
 	setCell(s, ox+lBorderL, botY, "╰", lBorder)
-	for i := 0; i < pw; i++ {
+	for i := range pw {
 		setCell(s, ox+lContent+i, botY, "─", lBorder)
 	}
 	setCell(s, ox+lBorderR, botY, "╯", lBorder)
 	setCell(s, ox+divCol, botY, "│", divStyle)
 	setCell(s, ox+rBorderL, botY, "╰", rBorder)
-	for i := 0; i < pw; i++ {
+	for i := range pw {
 		setCell(s, ox+rContent+i, botY, "─", rBorder)
 	}
 	setCell(s, ox+rBorderR, botY, "╯", rBorder)

@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/charmbracelet/x/vt"
 	"github.com/charmbracelet/x/xpty"
@@ -15,10 +17,12 @@ import (
 
 // Pane wraps a single PTY + terminal emulator pair.
 type Pane struct {
-	pty  xpty.Pty
-	emu  *vt.SafeEmulator
-	cmd  *exec.Cmd
-	done atomic.Bool
+	pty    xpty.Pty
+	emu    *vt.SafeEmulator
+	cmd    *exec.Cmd
+	done   atomic.Bool
+	closed atomic.Bool
+	once   sync.Once
 }
 
 // NewPane creates a PTY, starts the command, creates the emulator,
@@ -43,17 +47,19 @@ func NewPane(w, h int, cmd *exec.Cmd) (*Pane, error) {
 	}
 
 	// Pipe PTY output → emulator (terminal state updates).
+	// This goroutine exits when the PTY is closed or the process exits.
 	go func() {
 		io.Copy(emu, pty) //nolint:errcheck
 		p.done.Store(true)
 	}()
 
 	// Pipe emulator responses → PTY (e.g. DA responses, cursor position reports).
+	// This goroutine exits when the emulator or PTY is closed.
 	go func() {
 		io.Copy(pty, emu) //nolint:errcheck
 	}()
 
-	// Wait for the process to exit.
+	// Wait for the process to exit and mark as done.
 	go func() {
 		xpty.WaitProcess(context.Background(), cmd) //nolint:errcheck
 		p.done.Store(true)
@@ -73,7 +79,11 @@ func (p *Pane) Exited() bool {
 }
 
 // Resize updates both the PTY and emulator dimensions.
+// It is a no-op if the pane has been closed or the process has exited.
 func (p *Pane) Resize(w, h int) error {
+	if p.closed.Load() || p.done.Load() {
+		return nil
+	}
 	if err := p.pty.Resize(w, h); err != nil {
 		return fmt.Errorf("resizing pty: %w", err)
 	}
@@ -81,8 +91,20 @@ func (p *Pane) Resize(w, h int) error {
 	return nil
 }
 
-// Close shuts down the PTY and emulator.
+// Close shuts down the child process, PTY, and emulator.
+// Safe to call multiple times.
 func (p *Pane) Close() error {
-	p.emu.Close()
-	return p.pty.Close()
+	var closeErr error
+	p.once.Do(func() {
+		p.closed.Store(true)
+
+		// Signal the child process to exit gracefully if still running.
+		if p.cmd.Process != nil && !p.done.Load() {
+			p.cmd.Process.Signal(syscall.SIGTERM) //nolint:errcheck
+		}
+
+		p.emu.Close()
+		closeErr = p.pty.Close()
+	})
+	return closeErr
 }
